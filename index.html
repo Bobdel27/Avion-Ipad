@@ -66,7 +66,12 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke
 
 /* Zone principale */
 .work{display:grid;grid-template-columns:minmax(0,1fr) clamp(350px,38vw,470px);min-height:0}
-.mapwrap{position:relative;min-width:0;min-height:0}
+.mapwrap{position:relative;min-width:0;min-height:0;overflow:hidden}
+#sweep{position:absolute;z-index:450;border-radius:50%;pointer-events:none;display:none;
+  background:conic-gradient(from 0deg,rgba(76,201,240,0) 0deg,rgba(76,201,240,0) 270deg,rgba(76,201,240,.28) 358deg,rgba(76,201,240,.85) 360deg);
+  animation:sweep 4s linear infinite}
+@keyframes sweep{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){#sweep{animation:none}}
 #map{position:absolute;inset:0;background:var(--map-bg)}
 .tiles-dark{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}
 .leaflet-container{font:inherit;background:var(--map-bg)}
@@ -220,6 +225,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
 <main class="work">
   <section class="mapwrap">
     <div id="map"></div>
+    <div id="sweep"></div>
     <div class="ov ov-tc" id="alerts"></div>
     <div class="ov ov-tr">
       <button class="ib on" id="bTrail" aria-label="Traînées" title="Traînées"><svg class="i" viewBox="0 0 24 24"><path d="M3 19c5 0 4-9 9-9s4-6 9-6"/><circle cx="20" cy="4" r="1.5"/></svg></button>
@@ -263,7 +269,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
 <footer class="foot">
   <span id="status"></span>
   <span class="rec" id="records"></span>
-  <span id="attr">adsb.lol · airplanes.live · adsbdb · © OpenStreetMap</span>
+  <span id="attr">adsb.lol · airplanes.live · adsbdb · © OpenStreetMap · Esri</span>
 </footer>
 </div>
 
@@ -407,9 +413,21 @@ function applyTheme(){
   const dark = isDark();
   const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = dark ? '#070b10' : '#eef1f5';
   if (tiles) map.removeLayer(tiles);
-  tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  const web = /^https?:$/.test(location.protocol) && location.hostname !== '';
+  tiles = L.tileLayer(web ? 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
     {maxZoom:19, keepBuffer:4, updateWhenIdle:false, className:dark ? 'tiles-dark' : ''}).addTo(map);
   tiles.setZIndex(1);
+  let bad = 0, good = 0;
+  tiles.on('tileload', () => { good++; });
+  tiles.on('tileerror', () => {
+    if (++bad >= 4 && !good && tiles._osm){
+      map.removeLayer(tiles);
+      tiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        {maxZoom:19, keepBuffer:4, className:dark ? 'tiles-dark' : ''}).addTo(map);
+      tiles.setZIndex(1);
+    }
+  });
+  tiles._osm = web;
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (S.theme === 'auto') applyTheme(); });
 
@@ -424,7 +442,16 @@ function drawRings(){
   if (Math.abs(dc.lat - S.lat) > 1e-4 || Math.abs(dc.lon - S.lon) > 1e-4){
     L.circle([dc.lat, dc.lon], {radius:dr * NM, color:'#ffb627', weight:1.5, opacity:.6, fill:false, dashArray:'6 6', interactive:false}).addTo(ringLayer);
   }
+  placeSweep();
 }
+function placeSweep(){
+  const el = $('#sweep'); if (!el || !map._loaded) return;
+  const c = map.latLngToContainerPoint([dc.lat, dc.lon]), e = map.latLngToContainerPoint(dest(dc.lat, dc.lon, 90, dr * NM));
+  const r = Math.abs(e.x - c.x);
+  if (!isFinite(r) || r < 5){ el.style.display = 'none'; return; }
+  el.style.cssText = 'display:block;width:' + (2*r) + 'px;height:' + (2*r) + 'px;left:' + (c.x - r) + 'px;top:' + (c.y - r) + 'px';
+}
+map.on('move zoom resize viewreset', placeSweep);
 function fitZone(){
   map.fitBounds(L.latLng(dc.lat, dc.lon).toBounds(dr * NM * 2.1), {animate:false});
 }
@@ -458,6 +485,8 @@ function curPos(a){
 
 /* ---------- Réseau : positions ---------- */
 const SOURCES = [
+  {id:'px3', name:'adsb.lol (relais 3)', url:(la, lo, r) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent('https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r)},
+  {id:'px4', name:'adsb.lol (relais 4)', url:(la, lo, r) => 'https://thingproxy.freeboard.io/fetch/https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r},
   {id:'px1', name:'adsb.lol (relais 1)', url:(la, lo, r) => 'https://corsproxy.io/?url=' + encodeURIComponent('https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r)},
   {id:'px2', name:'adsb.lol (relais 2)', url:(la, lo, r) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r)},
   {id:'os', name:'OpenSky', url:(la, lo, r) => { const dl = r * 1.852 / 111.32, dn = dl / Math.max(.2, Math.cos(rad(+la)));
@@ -469,13 +498,14 @@ const SOURCES = [
   {id:'apl', name:'airplanes.live', url:(la, lo, r) => 'https://api.airplanes.live/v2/point/' + la + '/' + lo + '/' + r},
   {id:'fi', name:'adsb.fi', url:(la, lo, r) => 'https://opendata.adsb.fi/api/v3/lat/' + la + '/lon/' + lo + '/dist/' + r}
 ];
+SOURCES.sort((a, b) => (a.id[0] === 'p') - (b.id[0] === 'p'));
 function sigTimeout(ms){
   if (AbortSignal.timeout) return AbortSignal.timeout(ms);
   const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal;
 }
 async function poll(){
   if (busy) return; busy = true;
-  const order = S.source === 'auto' ? SOURCES.map((_, i) => SOURCES[(srcIdx + i) % SOURCES.length]).sort((a, b) => (a.id[0] === 'p') - (b.id[0] === 'p')) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
+  const order = S.source === 'auto' ? SOURCES.map((_, i) => SOURCES[(srcIdx + i) % SOURCES.length]) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
   let ok = false, lastErr = '', errs = [];
   for (const src of order){
     try {
@@ -880,6 +910,10 @@ function tick(){
   $('#clk').textContent = n.toLocaleTimeString('fr-FR');
   $('#utc').textContent = n.toISOString().slice(11, 16) + ' UTC';
   renderStatus();
+  if (selHex && S.key){ const a = ac.get(selHex); if (a) loadAcars(a, false); }
+}
+
+function move(){
   if (!document.hidden && S.extrap){
     for (const [h, m] of markers){ const a = ac.get(h); if (a) m.setLatLng(curPos(a)); }
     const a = ac.get(selHex);
@@ -889,9 +923,7 @@ function tick(){
       if (follow) map.panTo(p, {animate:true, duration:1, easeLinearity:1});
     }
   } else if (follow){ const a = ac.get(selHex); if (a) map.panTo(curPos(a), {animate:true}); }
-  if (selHex && S.key){ const a = ac.get(selHex); if (a) loadAcars(a, false); }
 }
-
 /* ---------- Zone de recherche ---------- */
 function updateHere(){
   const c = map.getCenter();
@@ -1024,7 +1056,7 @@ applyTheme(); buildLegend(); renderChips(); drawRings(); fitZone();
 $('#map').classList.toggle('labels', S.labels && map.getZoom() >= 9);
 window.addEventListener('resize', () => map.invalidateSize());
 new ResizeObserver(() => map.invalidateSize()).observe($('#map'));
-tick(); setInterval(tick, 1000);
+tick(); setInterval(tick, 1000); setInterval(move, 200);
 setInterval(pumpRoutes, 1200);
 renderAll(); poll(); wake();
 if (S.autoGeo) useGeo(false);
