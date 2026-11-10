@@ -269,7 +269,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
 <footer class="foot">
   <span id="status"></span>
   <span class="rec" id="records"></span>
-  <span id="attr">adsb.lol · airplanes.live · adsbdb · © OpenStreetMap · Esri</span>
+  <span id="attr">adsb.one · adsb.lol · airplanes.live · adsbdb · © OpenStreetMap · Esri</span>
 </footer>
 </div>
 
@@ -448,7 +448,7 @@ function placeSweep(){
   const el = $('#sweep'); if (!el || !map._loaded) return;
   const c = map.latLngToContainerPoint([dc.lat, dc.lon]), e = map.latLngToContainerPoint(dest(dc.lat, dc.lon, 90, dr * NM));
   const r = Math.abs(e.x - c.x);
-  if (!isFinite(r) || r < 5){ el.style.display = 'none'; return; }
+  if (!isFinite(r) || r < 5 || r > 5000){ el.style.display = 'none'; return; }
   el.style.cssText = 'display:block;width:' + (2*r) + 'px;height:' + (2*r) + 'px;left:' + (c.x - r) + 'px;top:' + (c.y - r) + 'px';
 }
 map.on('move zoom resize viewreset', placeSweep);
@@ -494,7 +494,7 @@ const SOURCES = [
       return 'https://opensky-network.org/api/states/all?lamin=' + (la - dl).toFixed(3) + '&lamax=' + (+la + dl).toFixed(3) + '&lomin=' + (lo - dn).toFixed(3) + '&lomax=' + (+lo + dn).toFixed(3); },
     parse:j => (j.states || []).map(x => ({hex:x[0], flight:x[1], lon:x[5], lat:x[6], alt_baro:x[8] ? 'ground' : (x[7] != null ? x[7] / .3048 : undefined),
       alt_geom:x[13] != null ? x[13] / .3048 : undefined, gs:x[9] != null ? x[9] / KT : undefined, track:x[10] ?? undefined,
-      baro_rate:x[11] != null ? x[11] * 196.85 : undefined, squawk:x[14] || undefined, category:x[17] ? ['','','A1','A2','A3','A4','A5','A6','A7','B1','B2','B3','B4','B6','B7','C1','C2'][x[17]] : undefined, seen_pos:0}))},
+      baro_rate:x[11] != null ? x[11] * 196.85 : undefined, squawk:x[14] || undefined, category:x[17] ? ['','','A1','A2','A3','A4','A5','A6','A7','B1','B2','B3','B4','','B6','B7','C1','C2','C3'][x[17]] : undefined, seen_pos:0}))},
   {id:'lol', name:'adsb.lol', url:(la, lo, r) => 'https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r},
   {id:'apl', name:'airplanes.live', url:(la, lo, r) => 'https://api.airplanes.live/v2/point/' + la + '/' + lo + '/' + r},
   {id:'fi', name:'adsb.fi', url:(la, lo, r) => 'https://opendata.adsb.fi/api/v3/lat/' + la + '/lon/' + lo + '/dist/' + r}
@@ -510,7 +510,7 @@ async function poll(){
   let ok = false, lastErr = '', errs = [];
   for (const src of order){
     try {
-      const res = await fetch(src.url(dc.lat.toFixed(4), dc.lon.toFixed(4), Math.min(250, Math.round(dr))), {signal:sigTimeout(9000)});
+      const res = await fetch(src.url(dc.lat.toFixed(4), dc.lon.toFixed(4), Math.min(250, Math.round(dr))), {signal:sigTimeout(src.id[0] === 'p' ? 5000 : 9000)});
       if (res.status === 429) throw new Error('Trop de requêtes (429)');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
@@ -921,7 +921,7 @@ function move(){
     if (a){
       const p = curPos(a);
       if (ahead && a.hasTrk) ahead.setLatLngs([p, dest(p[0], p[1], a.trk, a.gs * KT * 300)]);
-      if (follow) map.panTo(p, {animate:true, duration:1, easeLinearity:1});
+      if (follow) map.panTo(p, {animate:false});
     }
   } else if (follow){ const a = ac.get(selHex); if (a) map.panTo(curPos(a), {animate:true}); }
 }
