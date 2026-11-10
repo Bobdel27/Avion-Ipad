@@ -486,7 +486,7 @@ async function poll(){
       if (S.source === 'auto') srcIdx = SOURCES.indexOf(src);
       break;
     } catch(e){
-      lastErr = (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : (e instanceof TypeError ? 'réseau ou accès bloqué' : e.message);
+      lastErr = (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : (e instanceof TypeError ? 'bloqué ou erreur : ' + e.message : e.message);
       errs.push(src.name + ' : ' + lastErr);
     }
   }
