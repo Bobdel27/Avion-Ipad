@@ -287,7 +287,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
       <label>Unités<select id="sUnits"><option value="av">Aviation (ft, kt, nm)</option><option value="met">Métrique (m, km/h, km)</option></select></label>
       <label>Actualisation<select id="sRefresh"><option value="3">3 s</option><option value="5">5 s</option><option value="10">10 s</option><option value="15">15 s</option></select></label>
       <label>Thème<select id="sTheme"><option value="auto">Automatique</option><option value="dark">Sombre</option><option value="light">Clair</option></select></label>
-      <label>Source des positions<select id="sSource"><option value="auto">Automatique</option><option value="os">OpenSky</option><option value="lol">adsb.lol</option><option value="apl">airplanes.live</option><option value="fi">adsb.fi</option></select></label>
+      <label>Source des positions<select id="sSource"><option value="auto">Automatique</option><option value="one">adsb.one</option><option value="os">OpenSky</option><option value="lol">adsb.lol</option><option value="apl">airplanes.live</option><option value="fi">adsb.fi</option></select></label>
       <label class="ck"><input type="checkbox" id="sGround"> Masquer les avions au sol</label>
       <label class="ck"><input type="checkbox" id="sAuto"> Utiliser ma position au démarrage</label>
       <label class="ck"><input type="checkbox" id="sExtrap"> Mouvement fluide entre deux mises à jour</label>
@@ -485,6 +485,7 @@ function curPos(a){
 
 /* ---------- Réseau : positions ---------- */
 const SOURCES = [
+  {id:'one', name:'adsb.one', url:(la, lo, r) => 'https://api.adsb.one/v2/point/' + la + '/' + lo + '/' + r},
   {id:'px3', name:'adsb.lol (relais 3)', url:(la, lo, r) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent('https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r)},
   {id:'px4', name:'adsb.lol (relais 4)', url:(la, lo, r) => 'https://thingproxy.freeboard.io/fetch/https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r},
   {id:'px1', name:'adsb.lol (relais 1)', url:(la, lo, r) => 'https://corsproxy.io/?url=' + encodeURIComponent('https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r)},
