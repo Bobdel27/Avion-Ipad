@@ -287,7 +287,8 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
       <label>Unités<select id="sUnits"><option value="av">Aviation (ft, kt, nm)</option><option value="met">Métrique (m, km/h, km)</option></select></label>
       <label>Actualisation<select id="sRefresh"><option value="3">3 s</option><option value="5">5 s</option><option value="10">10 s</option><option value="15">15 s</option></select></label>
       <label>Thème<select id="sTheme"><option value="auto">Automatique</option><option value="dark">Sombre</option><option value="light">Clair</option></select></label>
-      <label>Source des positions<select id="sSource"><option value="auto">Automatique</option><option value="one">adsb.one</option><option value="os">OpenSky</option><option value="lol">adsb.lol</option><option value="apl">airplanes.live</option><option value="fi">adsb.fi</option></select></label>
+      <label>Source des positions<select id="sSource"><option value="auto">Automatique</option><option value="one">adsb.one</option><option value="os">OpenSky</option><option value="lol">adsb.lol</option><option value="apl">airplanes.live</option><option value="fi">adsb.fi</option><option value="fly">FlyItalyADSB</option></select></label>
+      <label>Clé FlyItalyADSB (gratuite)<input id="sFKey" type="text" placeholder="coller la clé ici" autocomplete="off"></label>
       <label class="ck"><input type="checkbox" id="sGround"> Masquer les avions au sol</label>
       <label class="ck"><input type="checkbox" id="sAuto"> Utiliser ma position au démarrage</label>
       <label class="ck"><input type="checkbox" id="sExtrap"> Mouvement fluide entre deux mises à jour</label>
@@ -312,7 +313,7 @@ const setHTML = (el, h) => { if (el._h !== h){ el.innerHTML = h; el._h = h; } };
 const nf = new Intl.NumberFormat('fr-FR');
 
 const DEF = {lat:46.0372, lon:4.0686, radius:100, units:'av', refresh:5, theme:'auto', source:'auto',
-  trails:true, labels:true, hideGround:false, extrap:true, autoGeo:true, sort:'dist', filter:'all', key:'', acPoll:30};
+  trails:true, labels:true, hideGround:false, extrap:true, autoGeo:true, sort:'dist', filter:'all', key:'', fkey:'', acPoll:30};
 let S = Object.assign({}, DEF, store.get('rd.settings', {}));
 const save = () => store.set('rd.settings', S);
 
@@ -499,24 +500,26 @@ const SOURCES = [
   {id:'apl', name:'airplanes.live', url:(la, lo, r) => 'https://api.airplanes.live/v2/point/' + la + '/' + lo + '/' + r},
   {id:'fi', name:'adsb.fi', url:(la, lo, r) => 'https://opendata.adsb.fi/api/v2/lat/' + la + '/lon/' + lo + '/dist/' + r}
 ];
-SOURCES.sort((a, b) => (a.id[0] === 'p') - (b.id[0] === 'p'));
+SOURCES.push({id:'fly', name:'FlyItalyADSB', needKey:true, headers:() => ({'X-Api-Key':S.fkey}), url:(la, lo, r) => 'https://api.flyitalyadsb.com/v2/lat/' + la + '/lon/' + lo + '/dist/' + Math.min(500, Math.round(r * 1.852))});
+SOURCES.sort((a, b) => ((a.id[0] === 'p') - (b.id[0] === 'p')) || ((b.id === 'fly') - (a.id === 'fly')));
 function sigTimeout(ms){
   if (AbortSignal.timeout) return AbortSignal.timeout(ms);
   const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal;
 }
 async function poll(){
   if (busy) return; busy = true;
-  const order = S.source === 'auto' ? SOURCES.map((_, i) => SOURCES[(srcIdx + i) % SOURCES.length]) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
+  const usable = SOURCES.filter(s => !s.needKey || S.fkey);
+  const order = S.source === 'auto' ? usable.map((_, i) => usable[(srcIdx + i) % usable.length]) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
   let ok = false, lastErr = '', errs = [];
   for (const src of order){
     try {
-      const res = await fetch(src.url(dc.lat.toFixed(4), dc.lon.toFixed(4), Math.min(250, Math.round(dr))), {signal:sigTimeout(src.id[0] === 'p' ? 5000 : 9000)});
+      const res = await fetch(src.url(dc.lat.toFixed(4), dc.lon.toFixed(4), Math.min(250, Math.round(dr))), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(src.id[0] === 'p' ? 5000 : 9000)});
       if (res.status === 429) throw new Error('Trop de requêtes (429)');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
       ingest(src.parse ? src.parse(j) : (j.ac || j.aircraft || []));
       srcName = src.name; lastOk = Date.now(); ok = true;
-      if (S.source === 'auto') srcIdx = SOURCES.indexOf(src);
+      if (S.source === 'auto') srcIdx = usable.indexOf(src);
       break;
     } catch(e){
       lastErr = (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : (e instanceof TypeError ? 'bloqué ou erreur : ' + e.message : e.message);
@@ -980,7 +983,7 @@ function hintFull(){ errMsg = 'Plein écran : dans Safari, Partager > Sur l’é
 /* ---------- Réglages ---------- */
 function fillSheet(){
   $('#sLat').value = S.lat; $('#sLon').value = S.lon; $('#sRadius').value = String(S.radius); $('#sUnits').value = S.units;
-  $('#sRefresh').value = String(S.refresh); $('#sTheme').value = S.theme; $('#sSource').value = S.source;
+  $('#sRefresh').value = String(S.refresh); $('#sTheme').value = S.theme; $('#sSource').value = S.source; $('#sFKey').value = S.fkey || '';
   $('#sGround').checked = S.hideGround; $('#sExtrap').checked = S.extrap; $('#sAuto').checked = S.autoGeo;
 }
 function openSheet(){ fillSheet(); $('#sheet').hidden = false; }
@@ -1001,6 +1004,7 @@ bind('#sUnits', e => { S.units = e.target.value; save(); buildLegend(); renderAl
 bind('#sRefresh', e => { S.refresh = +e.target.value; save(); schedule(); });
 bind('#sTheme', e => { S.theme = e.target.value; save(); applyTheme(); drawRings(); renderAll(); });
 bind('#sSource', e => { S.source = e.target.value; save(); poll(); });
+bind('#sFKey', e => { S.fkey = e.target.value.trim(); save(); poll(); });
 bind('#sGround', e => { S.hideGround = e.target.checked; save(); renderAll(); });
 bind('#sAuto', e => { S.autoGeo = e.target.checked; save(); });
 bind('#sExtrap', e => { S.extrap = e.target.checked; save(); });
