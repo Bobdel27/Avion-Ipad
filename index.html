@@ -68,6 +68,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke
 .work{display:grid;grid-template-columns:minmax(0,1fr) clamp(350px,38vw,470px);min-height:0}
 .mapwrap{position:relative;min-width:0;min-height:0}
 #map{position:absolute;inset:0;background:var(--map-bg)}
+.tiles-dark{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}
 .leaflet-container{font:inherit;background:var(--map-bg)}
 .leaflet-bar{border:1px solid var(--line)!important;box-shadow:var(--shadow)!important}
 .leaflet-bar a{background:var(--panel)!important;color:var(--fg)!important;border-bottom-color:var(--line)!important;width:38px!important;height:38px!important;line-height:38px!important;font-size:20px!important}
@@ -262,7 +263,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
 <footer class="foot">
   <span id="status"></span>
   <span class="rec" id="records"></span>
-  <span id="attr">airplanes.live · adsbdb · © OpenStreetMap © CARTO</span>
+  <span id="attr">airplanes.live · adsbdb · © OpenStreetMap</span>
 </footer>
 </div>
 
@@ -406,8 +407,8 @@ function applyTheme(){
   const dark = isDark();
   const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = dark ? '#070b10' : '#eef1f5';
   if (tiles) map.removeLayer(tiles);
-  tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/' + (dark ? 'dark_all' : 'light_all') + '/{z}/{x}/{y}.png',
-    {subdomains:'abcd', maxZoom:18, keepBuffer:4, updateWhenIdle:false}).addTo(map);
+  tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom:19, keepBuffer:4, updateWhenIdle:false, className:dark ? 'tiles-dark' : ''}).addTo(map);
   tiles.setZIndex(1);
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (S.theme === 'auto') applyTheme(); });
