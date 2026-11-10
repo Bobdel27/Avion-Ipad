@@ -458,6 +458,8 @@ function curPos(a){
 
 /* ---------- Réseau : positions ---------- */
 const SOURCES = [
+  {id:'px1', name:'adsb.lol (relais 1)', url:(la, lo, r) => 'https://corsproxy.io/?url=' + encodeURIComponent('https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r)},
+  {id:'px2', name:'adsb.lol (relais 2)', url:(la, lo, r) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r)},
   {id:'os', name:'OpenSky', url:(la, lo, r) => { const dl = r * 1.852 / 111.32, dn = dl / Math.max(.2, Math.cos(rad(+la)));
       return 'https://opensky-network.org/api/states/all?lamin=' + (la - dl).toFixed(3) + '&lamax=' + (+la + dl).toFixed(3) + '&lomin=' + (lo - dn).toFixed(3) + '&lomax=' + (+lo + dn).toFixed(3); },
     parse:j => (j.states || []).map(x => ({hex:x[0], flight:x[1], lon:x[5], lat:x[6], alt_baro:x[8] ? 'ground' : (x[7] != null ? x[7] / .3048 : undefined),
@@ -473,7 +475,7 @@ function sigTimeout(ms){
 }
 async function poll(){
   if (busy) return; busy = true;
-  const order = S.source === 'auto' ? SOURCES.map((_, i) => SOURCES[(srcIdx + i) % SOURCES.length]) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
+  const order = S.source === 'auto' ? SOURCES.map((_, i) => SOURCES[(srcIdx + i) % SOURCES.length]).sort((a, b) => (a.id[0] === 'p') - (b.id[0] === 'p')) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
   let ok = false, lastErr = '', errs = [];
   for (const src of order){
     try {
