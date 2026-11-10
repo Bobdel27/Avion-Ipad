@@ -281,7 +281,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
       <label>Unités<select id="sUnits"><option value="av">Aviation (ft, kt, nm)</option><option value="met">Métrique (m, km/h, km)</option></select></label>
       <label>Actualisation<select id="sRefresh"><option value="3">3 s</option><option value="5">5 s</option><option value="10">10 s</option><option value="15">15 s</option></select></label>
       <label>Thème<select id="sTheme"><option value="auto">Automatique</option><option value="dark">Sombre</option><option value="light">Clair</option></select></label>
-      <label>Source des positions<select id="sSource"><option value="auto">Automatique</option><option value="lol">adsb.lol</option><option value="apl">airplanes.live</option><option value="fi">adsb.fi</option></select></label>
+      <label>Source des positions<select id="sSource"><option value="auto">Automatique</option><option value="os">OpenSky</option><option value="lol">adsb.lol</option><option value="apl">airplanes.live</option><option value="fi">adsb.fi</option></select></label>
       <label class="ck"><input type="checkbox" id="sGround"> Masquer les avions au sol</label>
       <label class="ck"><input type="checkbox" id="sAuto"> Utiliser ma position au démarrage</label>
       <label class="ck"><input type="checkbox" id="sExtrap"> Mouvement fluide entre deux mises à jour</label>
@@ -458,6 +458,11 @@ function curPos(a){
 
 /* ---------- Réseau : positions ---------- */
 const SOURCES = [
+  {id:'os', name:'OpenSky', url:(la, lo, r) => { const dl = r * 1.852 / 111.32, dn = dl / Math.max(.2, Math.cos(rad(+la)));
+      return 'https://opensky-network.org/api/states/all?lamin=' + (la - dl).toFixed(3) + '&lamax=' + (+la + dl).toFixed(3) + '&lomin=' + (lo - dn).toFixed(3) + '&lomax=' + (+lo + dn).toFixed(3); },
+    parse:j => (j.states || []).map(x => ({hex:x[0], flight:x[1], lon:x[5], lat:x[6], alt_baro:x[8] ? 'ground' : (x[7] != null ? x[7] / .3048 : undefined),
+      alt_geom:x[13] != null ? x[13] / .3048 : undefined, gs:x[9] != null ? x[9] / KT : undefined, track:x[10] ?? undefined,
+      baro_rate:x[11] != null ? x[11] * 196.85 : undefined, squawk:x[14] || undefined, category:x[17] ? ['','','A1','A2','A3','A4','A5','A6','A7','B1','B2','B3','B4','B6','B7','C1','C2'][x[17]] : undefined, seen_pos:0}))},
   {id:'lol', name:'adsb.lol', url:(la, lo, r) => 'https://api.adsb.lol/v2/point/' + la + '/' + lo + '/' + r},
   {id:'apl', name:'airplanes.live', url:(la, lo, r) => 'https://api.airplanes.live/v2/point/' + la + '/' + lo + '/' + r},
   {id:'fi', name:'adsb.fi', url:(la, lo, r) => 'https://opendata.adsb.fi/api/v3/lat/' + la + '/lon/' + lo + '/dist/' + r}
@@ -469,23 +474,23 @@ function sigTimeout(ms){
 async function poll(){
   if (busy) return; busy = true;
   const order = S.source === 'auto' ? SOURCES.map((_, i) => SOURCES[(srcIdx + i) % SOURCES.length]) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
-  let ok = false, lastErr = '';
+  let ok = false, lastErr = '', errs = [];
   for (const src of order){
     try {
       const res = await fetch(src.url(dc.lat.toFixed(4), dc.lon.toFixed(4), Math.min(250, Math.round(dr))), {cache:'no-store', signal:sigTimeout(9000)});
       if (res.status === 429) throw new Error('Trop de requêtes (429)');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
-      ingest(j.ac || j.aircraft || []);
+      ingest(src.parse ? src.parse(j) : (j.ac || j.aircraft || []));
       srcName = src.name; lastOk = Date.now(); ok = true;
       if (S.source === 'auto') srcIdx = SOURCES.indexOf(src);
       break;
     } catch(e){
       lastErr = (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : (e instanceof TypeError ? 'réseau ou accès bloqué' : e.message);
-      lastErr = src.name + ' : ' + lastErr;
+      errs.push(src.name + ' : ' + lastErr);
     }
   }
-  errMsg = ok ? '' : lastErr;
+  errMsg = ok ? '' : errs.join(' | ');
   busy = false;
   renderAll();
   schedule();
