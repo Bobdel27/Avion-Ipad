@@ -284,12 +284,9 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
       <label class="ck"><input type="checkbox" id="sGround"> Masquer les avions au sol</label>
       <label class="ck"><input type="checkbox" id="sAuto"> Utiliser ma position au démarrage</label>
       <label class="ck"><input type="checkbox" id="sExtrap"> Mouvement fluide entre deux mises à jour</label>
-      <label style="grid-column:1/-1">Clé API Airframes (messages ACARS)
-        <input type="password" id="sKey" placeholder="Colle ta clé ici" autocomplete="off">
-      </label>
-      <label>Actualisation ACARS<select id="sAcPoll"><option value="30">30 s</option><option value="60">60 s</option><option value="120">2 min</option></select></label>
+      
     </div>
-    <p class="note">Les réglages sont enregistrés sur cet appareil. La clé Airframes n'est envoyée qu'à api.airframes.io.</p>
+    <p class="note">Les réglages sont enregistrés sur cet appareil.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="sGeo">Utiliser ma position</button><button class="btn accent" id="sDone">Terminé</button></div>
   </div>
 </div>
@@ -820,7 +817,7 @@ function renderDetail(){
   }
   setHTML($('#dProf'), ph2); $('#dProf').hidden = !ph2;
 
-  setHTML($('#dAcars'), renderAcarsHtml(a));
+  { const h = renderAcarsHtml(a); setHTML($('#dAcars'), h); $('#dAcars').hidden = !h; }
   const ls = [];
   ls.push('<a href="https://globe.airplanes.live/?icao=' + a.hex + '" target="_blank" rel="noopener">Carte airplanes.live</a>');
   if (a.call) ls.push('<a href="https://www.flightaware.com/live/flight/' + encodeURIComponent(a.call) + '" target="_blank" rel="noopener">FlightAware</a>');
@@ -829,10 +826,7 @@ function renderDetail(){
   d.scrollTop = top;
 }
 function renderAcarsHtml(a){
-  if (!S.key){
-    return '<h4>ACARS</h4><div class="note">Les messages ACARS ne font pas partie des données ADS-B ouvertes. Ajoute une clé Airframes dans les réglages pour les afficher ici.</div>' +
-      '<div style="margin-top:8px"><button class="btn" data-act="settings">Ouvrir les réglages</button></div>';
-  }
+  if (!S.key) return '';
   const q = acarsKey(a), c = q ? acars.get(q) : null;
   if (!q) return '<h4>ACARS</h4><div class="note">Pas d’indicatif ni d’immatriculation pour interroger Airframes.</div>';
   let h = '<h4>ACARS · Airframes</h4>';
@@ -945,7 +939,7 @@ function hintFull(){ errMsg = 'Plein écran : dans Safari, Partager > Sur l’é
 function fillSheet(){
   $('#sLat').value = S.lat; $('#sLon').value = S.lon; $('#sRadius').value = String(S.radius); $('#sUnits').value = S.units;
   $('#sRefresh').value = String(S.refresh); $('#sTheme').value = S.theme; $('#sSource').value = S.source;
-  $('#sGround').checked = S.hideGround; $('#sExtrap').checked = S.extrap; $('#sAuto').checked = S.autoGeo; $('#sKey').value = S.key; $('#sAcPoll').value = String(S.acPoll);
+  $('#sGround').checked = S.hideGround; $('#sExtrap').checked = S.extrap; $('#sAuto').checked = S.autoGeo;
 }
 function openSheet(){ fillSheet(); $('#sheet').hidden = false; }
 function closeSheet(){ $('#sheet').hidden = true; }
@@ -968,8 +962,6 @@ bind('#sSource', e => { S.source = e.target.value; save(); poll(); });
 bind('#sGround', e => { S.hideGround = e.target.checked; save(); renderAll(); });
 bind('#sAuto', e => { S.autoGeo = e.target.checked; save(); });
 bind('#sExtrap', e => { S.extrap = e.target.checked; save(); });
-bind('#sKey', e => { S.key = e.target.value.trim(); save(); acars.clear(); renderDetail(); });
-bind('#sAcPoll', e => { S.acPoll = +e.target.value; save(); });
 function useGeo(manual){
   if (!navigator.geolocation){ if (manual) msg('Position indisponible sur cet appareil.'); return; }
   navigator.geolocation.getCurrentPosition(p => {
