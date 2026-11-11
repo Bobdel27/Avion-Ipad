@@ -448,7 +448,10 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { 
 function ringList(){
   if (S.rings === 'none') return [];
   if (S.rings === 'quarter') return [1, 2, 3, 4].map(i => ({m:S.radius * NM * i / 4, label:fDist(S.radius * 1.852 * i / 4)}));
-  return [25, 50, 100].map(v => ({m:v * (MET() ? 1000 : NM), label:v + (MET() ? ' km' : ' nm')}));
+  const max = MET() ? S.radius * 1.852 : S.radius;
+  const vals = [25, 50, 100, 150, 200, 250, 300, 400, 500].filter(v => v <= max + .5);
+  if (!vals.length || vals[vals.length - 1] < max - 1) vals.push(Math.round(max));
+  return vals.map(v => ({m:v * (MET() ? 1000 : NM), label:v + (MET() ? ' km' : ' nm')}));
 }
 function drawRings(){
   ringLayer.clearLayers();
