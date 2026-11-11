@@ -222,6 +222,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
   </div>
   <div class="stats" id="stats"></div>
   <div class="bar-r">
+    <button class="chip" id="bFav" aria-pressed="false">★ Favoris</button>
     <div class="clock"><b id="clk">--:--:--</b><br><span id="utc"></span></div>
     <button class="ib" id="bFull" aria-label="Plein écran"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     <button class="ib" id="bSet" aria-label="Réglages"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
@@ -767,7 +768,7 @@ function drawSel(){
 }
 
 /* ---------- Filtres et liste ---------- */
-const FILTERS = [['all','Tous'],['air','En vol'],['gnd','Au sol'],['mil','Militaires'],['heli','Hélicos'],['emg','Urgences'],['fav','★ Favoris']];
+const FILTERS = [['all','Tous'],['air','En vol'],['gnd','Au sol'],['mil','Militaires'],['heli','Hélicos'],['emg','Urgences']];
 let query = '';
 function passes(a){
   if (pinned.has(a.hex)) return true;
@@ -797,6 +798,7 @@ function computeFiltered(){
   filtered = arr; filteredSet = new Set(arr.map(a => a.hex));
 }
 function renderChips(){
+  $('#bFav').setAttribute('aria-pressed', S.filter === 'fav');
   setHTML($('#chips'), FILTERS.map(([k, t]) => '<button class="chip" data-f="' + k + '" aria-pressed="' + (S.filter === k) + '">' + t + '</button>').join(''));
 }
 function renderList(){
@@ -1125,6 +1127,9 @@ $('#bHome').addEventListener('click', () => {
 $('#chips').addEventListener('click', e => {
   const b = e.target.closest('[data-f]'); if (!b) return;
   S.filter = b.dataset.f; save(); renderChips(); renderAll();
+});
+$('#bFav').addEventListener('click', () => {
+  S.filter = S.filter === 'fav' ? 'all' : 'fav'; save(); renderChips(); renderAll();
 });
 $('#sort').addEventListener('change', e => { S.sort = e.target.value; save(); renderAll(); });
 $('#q').addEventListener('input', e => { query = e.target.value.trim(); renderAll(); });
