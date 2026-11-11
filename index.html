@@ -106,6 +106,8 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke
 @media (prefers-reduced-motion:no-preference){.acm.emg .pl::before{animation:pulse 1s ease-in-out infinite}}
 .lb{display:none;position:absolute;left:30px;top:50%;transform:translateY(-50%);white-space:nowrap;font:600 11px var(--mono);color:var(--fg);background:var(--lbbg);border-radius:5px;padding:1px 5px;pointer-events:none}
 .labels .lb,.acm.sel .lb{display:block}
+.acm.lbl .lb{left:auto;right:30px}
+.acm.lbh:not(.sel) .lb{display:none!important}
 .apm span{position:absolute;transform:translate(-50%,-130%);font:700 12px var(--mono);color:var(--fg);background:var(--lbbg);border:1px solid var(--accent);border-radius:5px;padding:1px 6px;white-space:nowrap}
 .home-dot{width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid #fff;box-shadow:0 0 0 3px rgba(76,201,240,.35)}
 
@@ -705,6 +707,35 @@ function syncMap(){
       tr.line.setStyle({color:altColor(a)});
     } else if (tr.line){ trailLayer.removeLayer(tr.line); tr.line = null; }
   }
+  layoutLabels();
+}
+function layoutLabels(){
+  if (!S.labels || map.getZoom() < 9) return;
+  const sz = map.getSize(), items = [];
+  for (const a of filtered){
+    const m = markers.get(a.hex), el = m && m.getElement(); if (!el || !el.firstChild) continue;
+    items.push({a:a, el:el, lb:el.firstChild.lastChild, p:map.latLngToContainerPoint(m.getLatLng()), pr:a.hex === selHex ? 3 : isEmerg(a) ? 2 : isWatched(a) ? 1 : 0});
+  }
+  if (!items.length || items.length > 400) return;
+  items.forEach(i => { i.w = i.lb ? i.lb.offsetWidth : 0; });
+  items.sort((x, y) => y.pr - x.pr);
+  const mr = $('#map').getBoundingClientRect(), fixed = [];
+  document.querySelectorAll('.ov-tr .ib,.leaflet-control-zoom,.ov-bl .pill,.legend,.alertbox').forEach(e => {
+    const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0) fixed.push([r.left - mr.left - 4, r.top - mr.top - 4, r.right - mr.left + 4, r.bottom - mr.top + 4]);
+  });
+  const icons = items.map(i => [i.p.x - 13, i.p.y - 13, i.p.x + 13, i.p.y + 13]), done = fixed.slice();
+  const hit = (r, o) => r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1];
+  items.forEach((i, k) => {
+    const x = i.p.x, y = i.p.y, w = i.w, R = [x + 13, y - 9, x + 13 + w, y + 9], Lf = [x - 13 - w, y - 9, x - 13, y + 9];
+    const ok = r => r[0] >= 0 && r[2] <= sz.x && r[1] >= 0 && r[3] <= sz.y && !done.some(o => hit(r, o)) && !icons.some((o, j) => j !== k && hit(r, o));
+    let side = '', hide = false;
+    if (x < 0 || x > sz.x || y < 0 || y > sz.y) hide = true;
+    else if (ok(R)){ side = 'r'; done.push(R); }
+    else if (ok(Lf)){ side = 'l'; done.push(Lf); }
+    else if (i.pr === 3){ side = 'r'; done.push(R); }
+    else hide = true;
+    i.el.classList.toggle('lbl', side === 'l'); i.el.classList.toggle('lbh', hide);
+  });
 }
 function drawSel(){
   selLayer.clearLayers(); ahead = null; homeLine = null;
@@ -1053,7 +1084,9 @@ function tick(){
   if (toasts.length) renderAlerts();
 }
 
+let mvN = 0;
 function move(){
+  if (++mvN % 5 === 0 && !document.hidden) layoutLabels();
   if (!document.hidden && S.extrap){
     for (const [h, m] of markers){ const a = ac.get(h); if (a) m.setLatLng(curPos(a)); }
     const a = ac.get(selHex);
@@ -1229,6 +1262,7 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 $('#sort').value = S.sort;
 applyTheme(); buildLegend(); renderChips(); drawRings(); fitZone();
 $('#map').classList.toggle('labels', S.labels && map.getZoom() >= 9);
+map.on('zoomend moveend', layoutLabels);
 window.addEventListener('resize', () => map.invalidateSize());
 new ResizeObserver(() => map.invalidateSize()).observe($('#map'));
 tick(); setInterval(tick, 1000); setInterval(move, 200);
