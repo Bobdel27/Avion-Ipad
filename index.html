@@ -710,13 +710,14 @@ function syncMap(){
   layoutLabels();
 }
 function layoutLabels(){
-  if (!S.labels || map.getZoom() < 9) return;
+  if (!S.labels || map.getZoom() < 6) return;
   const sz = map.getSize(), items = [];
   for (const a of filtered){
     const m = markers.get(a.hex), el = m && m.getElement(); if (!el || !el.firstChild) continue;
     items.push({a:a, el:el, lb:el.firstChild.lastChild, p:map.latLngToContainerPoint(m.getLatLng()), pr:a.hex === selHex ? 3 : isEmerg(a) ? 2 : isWatched(a) ? 1 : 0});
   }
-  if (!items.length || items.length > 400) return;
+  if (items.length > 400){ items.forEach(i => i.el.classList.add('lbh')); return; }
+  if (!items.length) return;
   items.forEach(i => { i.w = i.lb ? i.lb.offsetWidth : 0; });
   items.sort((x, y) => y.pr - x.pr);
   const mr = $('#map').getBoundingClientRect(), fixed = [];
@@ -1106,7 +1107,7 @@ function updateHere(){
 map.on('moveend', updateHere);
 map.on('dragstart', () => { if (follow){ follow = false; renderDetail(); } });
 map.on('click', () => { if (selHex) deselect(); });
-map.on('zoomend', () => $('#map').classList.toggle('labels', S.labels && map.getZoom() >= 9));
+map.on('zoomend', () => $('#map').classList.toggle('labels', S.labels && map.getZoom() >= 6));
 $('#bHere').addEventListener('click', () => {
   const c = map.getCenter(), ne = map.getBounds().getNorthEast();
   dc = {lat:+c.lat.toFixed(4), lon:+c.lng.toFixed(4)};
@@ -1261,7 +1262,7 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 /* ---------- Démarrage ---------- */
 $('#sort').value = S.sort;
 applyTheme(); buildLegend(); renderChips(); drawRings(); fitZone();
-$('#map').classList.toggle('labels', S.labels && map.getZoom() >= 9);
+$('#map').classList.toggle('labels', S.labels && map.getZoom() >= 6);
 map.on('zoomend moveend', layoutLabels);
 window.addEventListener('resize', () => map.invalidateSize());
 new ResizeObserver(() => map.invalidateSize()).observe($('#map'));
