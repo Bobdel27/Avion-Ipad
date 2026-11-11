@@ -91,6 +91,10 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke
 @media (prefers-reduced-motion:no-preference){.alertbox{animation:pulse 1.6s ease-in-out infinite}}
 @keyframes pulse{50%{opacity:.72}}
 
+.alertbox.w{background:var(--accent);color:var(--accent-fg)}
+.alertbox.m{background:var(--mil);color:#fff}
+.rl{position:absolute;transform:translate(-50%,-105%);font:700 10px var(--mono);color:var(--accent);background:var(--lbbg);border-radius:4px;padding:0 4px;white-space:nowrap;pointer-events:none}
+
 /* Marqueurs */
 .acm{background:none;border:0}
 .pl{position:relative;width:34px;height:34px;display:grid;place-items:center;--c:#8a97a6}
@@ -246,7 +250,7 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
   <aside class="side">
     <div class="tools">
       <div class="r1">
-        <label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="q" type="search" placeholder="Indicatif, immat., hex, type" autocomplete="off" autocapitalize="off" aria-label="Rechercher un avion"></label>
+        <label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="q" type="search" placeholder="N° de vol, indicatif, immat., hex, type" autocomplete="off" autocapitalize="off" aria-label="Rechercher un avion"></label>
         <select class="sel" id="sort" aria-label="Tri">
           <option value="dist">Distance</option><option value="alt">Altitude</option><option value="spd">Vitesse</option><option value="call">Indicatif</option>
         </select>
@@ -292,6 +296,11 @@ details pre{font:11px var(--mono);white-space:pre-wrap;word-break:break-all;max-
       <label class="ck"><input type="checkbox" id="sGround"> Masquer les avions au sol</label>
       <label class="ck"><input type="checkbox" id="sAuto"> Utiliser ma position au démarrage</label>
       <label class="ck"><input type="checkbox" id="sExtrap"> Mouvement fluide entre deux mises à jour</label>
+      <label>Cercles de distance<select id="sRings"><option value="fix">25 / 50 / 100</option><option value="quarter">Quarts du rayon</option><option value="none">Aucun</option></select></label>
+      <label class="ck"><input type="checkbox" id="sAlSnd"> Alerte sonore (urgences, favoris)</label>
+      <label class="ck"><input type="checkbox" id="sAlMil"> Alerte à l’arrivée d’un avion militaire</label>
+      <label class="ck"><input type="checkbox" id="sAlNot"> Notifications du navigateur</label>
+      <label style="grid-column:1/-1">Favoris à surveiller (séparés par des virgules : n° de vol, indicatif, immat., hex)<input type="text" id="sWatch" placeholder="AF1234, AFR22BC, F-GKXA" autocomplete="off"></label>
       
     </div>
     <p class="note">Les réglages sont enregistrés sur cet appareil.</p>
@@ -313,7 +322,7 @@ const setHTML = (el, h) => { if (el._h !== h){ el.innerHTML = h; el._h = h; } };
 const nf = new Intl.NumberFormat('fr-FR');
 
 const DEF = {lat:46.0372, lon:4.0686, radius:100, units:'av', refresh:5, theme:'auto', source:'auto',
-  trails:true, labels:true, hideGround:false, extrap:true, autoGeo:true, sort:'dist', filter:'all', key:'', fkey:'', acPoll:30};
+  trails:true, labels:true, hideGround:false, extrap:true, autoGeo:true, sort:'dist', filter:'all', key:'', fkey:'', acPoll:30, rings:'fix', alSnd:true, alMil:false, alNot:false, watch:[]};
 let S = Object.assign({}, DEF, store.get('rd.settings', {}));
 const save = () => store.set('rd.settings', S);
 
@@ -399,6 +408,8 @@ let selHex = null, follow = false;
 let dc = {lat:S.lat, lon:S.lon}, dr = S.radius;
 let lastOk = 0, errMsg = '', busy = false, timer = 0, srcIdx = 0, srcName = '';
 const routes = new Map(), infos = new Map(), acars = new Map();
+const pinned = new Map(), alerted = new Map();
+let toasts = [], firstDone = false, homeLine = null, actx = null;
 
 /* ---------- Carte ---------- */
 const map = L.map('map', {zoomControl:false, attributionControl:false, preferCanvas:true, zoomSnap:.5, worldCopyJump:true, tap:true});
@@ -432,14 +443,21 @@ function applyTheme(){
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (S.theme === 'auto') applyTheme(); });
 
+function ringList(){
+  if (S.rings === 'none') return [];
+  if (S.rings === 'quarter') return [1, 2, 3, 4].map(i => ({m:S.radius * NM * i / 4, label:fDist(S.radius * 1.852 * i / 4)}));
+  return [25, 50, 100].map(v => ({m:v * (MET() ? 1000 : NM), label:v + (MET() ? ' km' : ' nm')}));
+}
 function drawRings(){
   ringLayer.clearLayers();
   const home = [S.lat, S.lon];
   L.marker(home, {icon:L.divIcon({className:'', html:'<div class="home-dot"></div>', iconSize:[12,12], iconAnchor:[6,6]}), interactive:false, keyboard:false}).addTo(ringLayer);
   const col = isDark() ? '#4cc9f0' : '#0a7ea4';
-  for (let i = 1; i <= 4; i++){
-    L.circle(home, {radius:S.radius * NM * i / 4, color:col, weight:1, opacity:i === 4 ? .45 : .25, fill:false, dashArray:i === 4 ? null : '4 8', interactive:false}).addTo(ringLayer);
-  }
+  ringList().forEach((r, i, arr) => {
+    const last = i === arr.length - 1;
+    L.circle(home, {radius:r.m, color:col, weight:1, opacity:last ? .5 : .3, fill:false, dashArray:last ? null : '4 8', interactive:false}).addTo(ringLayer);
+    L.marker(dest(S.lat, S.lon, 0, r.m), {icon:L.divIcon({className:'', html:'<span class="rl">' + r.label + '</span>', iconSize:[0, 0]}), interactive:false, keyboard:false}).addTo(ringLayer);
+  });
   if (Math.abs(dc.lat - S.lat) > 1e-4 || Math.abs(dc.lon - S.lon) > 1e-4){
     L.circle([dc.lat, dc.lon], {radius:dr * NM, color:'#ffb627', weight:1.5, opacity:.6, fill:false, dashArray:'6 6', interactive:false}).addTo(ringLayer);
   }
@@ -477,6 +495,21 @@ function norm(o, t){
 }
 const isEmerg = a => ['7500','7600','7700'].includes(a.sq) || !!a.emerg;
 const validCall = c => /^[A-Z]{3}\d{1,4}[A-Z]{0,2}$/.test(c || '');
+const AIRL = {'AF':['AFR'],'KL':['KLM'],'BA':['BAW'],'LH':['DLH'],'IB':['IBE'],'I2':['IBS'],'VY':['VLG'],'FR':['RYR','RUK'],'U2':['EZY','EJU','EZS'],'W6':['WZZ'],'W9':['WUK'],'TO':['TVF'],'HV':['TRA'],'TP':['TAP'],'AZ':['ITY'],'SN':['BEL'],'LX':['SWR'],'OS':['AUA'],'SK':['SAS'],'AY':['FIN'],'DY':['NOZ'],'EW':['EWG'],'LS':['EXS'],'BY':['TOM'],'TK':['THY'],'PC':['PGT'],'EK':['UAE'],'QR':['QTR'],'EY':['ETD'],'SV':['SVA'],'MS':['MSR'],'AT':['RAM'],'AH':['DAH'],'TU':['TAR'],'SQ':['SIA'],'CX':['CPA'],'JL':['JAL'],'NH':['ANA'],'KE':['KAL'],'OZ':['AAR'],'CA':['CCA'],'MU':['CES'],'CZ':['CSN'],'AI':['AIC'],'QF':['QFA'],'AA':['AAL'],'DL':['DAL'],'UA':['UAL'],'AC':['ACA'],'WN':['SWA'],'B6':['JBU'],'AS':['ASA'],'LA':['LAN'],'AV':['AVA'],'ET':['ETH'],'KQ':['KQA'],'SA':['SAA'],'LO':['LOT'],'OK':['CSA'],'RO':['ROT'],'JU':['ASL'],'A3':['AEE'],'SU':['AFL'],'TX':['FWI'],'SS':['CRL'],'ZI':['AAF'],'NK':['NKS'],'F9':['FFT'],'G4':['AAY'],'XK':['CCM'],'UX':['AEA'],'V7':['VOE'],'FZ':['FDB'],'WY':['OMA'],'GF':['GFA'],'KU':['KAC'],'RJ':['RJA'],'ME':['MEA'],'LY':['ELY'],'VS':['VIR'],'EI':['EIN'],'DE':['CFG'],'X3':['TUI'],'5O':['FPO'],'BT':['BTI'],'4U':['GWI'],'EN':['DLA'],'QS':['TVS'],'PS':['AUI'],'TG':['THA'],'MH':['MAS'],'GA':['GIA'],'BR':['EVA'],'CI':['CAL'],'NZ':['ANZ']};
+function icaoAll(q){
+  const m = /^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/.exec(q || ''); if (!m || !AIRL[m[1]]) return [];
+  return AIRL[m[1]].map(c => c + m[2]);
+}
+const card = b => ['N','NE','E','SE','S','SO','O','NO'][Math.round((((b % 360) + 360) % 360) / 45) % 8];
+function matchEntry(a, e0){
+  const e = (e0 || '').toUpperCase().replace(/\s+/g, ''); if (!e) return false;
+  const call = (a.call || '').toUpperCase(), reg = (a.reg || '').toUpperCase().replace(/-/g, '');
+  const r = routes.get(a.call), ci = r && r.s === 'ok' ? (r.d.ciata || '').toUpperCase() : '';
+  if (e === call || e === a.hex.toUpperCase() || (reg && e.replace(/-/g, '') === reg) || (ci && e === ci)) return true;
+  if (call && icaoAll(e).includes(call)) return true;
+  return /^[A-Z]{3}$/.test(e) && call.length > 3 && call.startsWith(e) && /\d/.test(call[3]);
+}
+const isWatched = a => (S.watch || []).some(e => matchEntry(a, e));
 
 function curPos(a){
   if (!S.extrap || a.ground || !a.hasTrk || !(a.gs > 30)) return [a.lat, a.lon];
@@ -528,6 +561,7 @@ async function poll(){
   }
   errMsg = ok ? '' : errs.join(' | ');
   busy = false;
+  if (ok){ checkAlerts(); firstDone = true; if (pinned.size) refreshPinned().then(renderAll); }
   renderAll();
   schedule();
 }
@@ -546,7 +580,7 @@ function ingest(list){
     next.set(a.hex, a); pushTrail(a);
   }
   const keep = ac.get(selHex);
-  if (keep && !next.has(selHex) && t - keep.t0 < 120000){ keep.lost = true; next.set(selHex, keep); }
+  if (keep && !next.has(selHex) && t - keep.t0 < 120000){ keep.lost = !pinned.has(selHex); next.set(selHex, keep); }
   ac = next;
   for (const [h, tr] of trails){
     if (!ac.has(h) && t - tr.upd > 120000){ if (tr.line) trailLayer.removeLayer(tr.line); trails.delete(h); }
@@ -673,8 +707,9 @@ function syncMap(){
   }
 }
 function drawSel(){
-  selLayer.clearLayers(); ahead = null;
+  selLayer.clearLayers(); ahead = null; homeLine = null;
   const a = ac.get(selHex); if (!a) return;
+  homeLine = L.polyline(gcPts([S.lat, S.lon], curPos(a), 24), {color:isDark() ? '#4cc9f0' : '#0a7ea4', weight:1.2, opacity:.55, dashArray:'1 6', interactive:false}).addTo(selLayer);
   const tr = trails.get(selHex);
   if (tr && tr.pts.length > 1){
     for (let i = 1; i < tr.pts.length; i++){
@@ -697,11 +732,13 @@ function drawSel(){
 }
 
 /* ---------- Filtres et liste ---------- */
-const FILTERS = [['all','Tous'],['air','En vol'],['gnd','Au sol'],['mil','Militaires'],['heli','Hélicos'],['emg','Urgences']];
+const FILTERS = [['all','Tous'],['air','En vol'],['gnd','Au sol'],['mil','Militaires'],['heli','Hélicos'],['emg','Urgences'],['fav','★ Favoris']];
 let query = '';
 function passes(a){
+  if (pinned.has(a.hex)) return true;
   if (S.hideGround && a.ground && a.hex !== selHex) return false;
   switch (S.filter){
+    case 'fav': if (!isWatched(a)) return false; break;
     case 'air': if (a.ground) return false; break;
     case 'gnd': if (!a.ground) return false; break;
     case 'mil': if (!a.mil) return false; break;
@@ -709,8 +746,9 @@ function passes(a){
     case 'emg': if (!isEmerg(a)) return false; break;
   }
   if (query){
-    const q = query.toLowerCase();
-    if (!(a.call.toLowerCase().includes(q) || a.reg.toLowerCase().includes(q) || a.hex.includes(q) || a.type.toLowerCase().includes(q) || a.op.toLowerCase().includes(q))) return false;
+    const q = query.toLowerCase(), qn = q.replace(/\s+/g, ''), qis = icaoAll(qn.toUpperCase()).map(x => x.toLowerCase());
+    const r = routes.get(a.call), ci = r && r.s === 'ok' ? (r.d.ciata || '').toLowerCase() : '', c = a.call.toLowerCase();
+    if (!(c.includes(qn) || qis.some(x => c.includes(x)) || (ci && ci.includes(qn)) || a.reg.toLowerCase().replace(/-/g, '').includes(qn.replace(/-/g, '')) || a.hex.includes(qn) || a.type.toLowerCase().includes(q) || a.op.toLowerCase().includes(q))) return false;
   }
   return true;
 }
@@ -729,7 +767,7 @@ function renderChips(){
 function renderList(){
   const el = $('#list'), top = el.scrollTop;
   if (!filtered.length){
-    setHTML(el, '<div class="empty">' + (ac.size ? 'Aucun avion ne correspond aux filtres.' : (lastOk ? 'Aucun avion dans la zone.' : (errMsg ? 'Impossible de récupérer les positions.<br><small>' + esc(errMsg) + '</small>' : 'Chargement…'))) + '</div>');
+    setHTML(el, '<div class="empty">' + (ac.size ? 'Aucun avion ne correspond aux filtres.' : (lastOk ? 'Aucun avion dans la zone.' : (errMsg ? 'Impossible de récupérer les positions.<br><small>' + esc(errMsg) + '</small>' : 'Chargement…'))) + (query ? '<br><br><button class="btn accent" data-global="1">Chercher « ' + esc(query) + ' » dans le monde</button>' : '') + '</div>');
     return;
   }
   const rows = filtered.slice(0, 150).map(a => {
@@ -739,8 +777,8 @@ function renderList(){
     return '<button class="row' + (a.hex === selHex ? ' on' : '') + (isEmerg(a) ? ' emg' : '') + '" data-h="' + a.hex + '">' +
       '<i class="dot" style="background:' + altColor(a) + '"></i>' +
       '<span class="r1"><b>' + esc(a.call || a.reg || a.hex.toUpperCase()) + '</b>' + (rt ? '<em>' + esc(rt) + '</em>' : '') +
-        (a.mil ? ' <span class="tag mil">MIL</span>' : '') + (isEmerg(a) ? ' <span class="tag bad">URG</span>' : '') + '</span>' +
-      '<span class="rv"><b>' + (a.ground ? 'Sol' : fAlt(a.alt, true)) + vs + '</b><small>' + fSpd(a.gs) + ' · ' + fDist(a.dist) + '</small></span>' +
+        (a.mil ? ' <span class="tag mil">MIL</span>' : '') + (isEmerg(a) ? ' <span class="tag bad">URG</span>' : '') + (isWatched(a) ? ' <span class="tag acc">★</span>' : '') + '</span>' +
+      '<span class="rv"><b>' + (a.ground ? 'Sol' : fAlt(a.alt, true)) + vs + '</b><small>' + fSpd(a.gs) + ' · ' + fDist(a.dist) + ' ' + card(a.brg) + '</small></span>' +
       '<span class="r2">' + esc(sub) + '</span></button>';
   }).join('');
   setHTML(el, rows + (filtered.length > 150 ? '<div class="empty">+ ' + (filtered.length - 150) + ' autres. Affine la recherche.</div>' : ''));
@@ -763,10 +801,12 @@ function renderStats(){
   $('#records').textContent = rec;
 }
 function renderAlerts(){
-  const em = [...ac.values()].filter(isEmerg);
-  setHTML($('#alerts'), em.slice(0, 3).map(a => '<div class="alertbox" data-h="' + a.hex + '">' +
+  const now = Date.now(); toasts = toasts.filter(t => t.until > now);
+  const em = [...ac.values()].filter(isEmerg).slice(0, 3).map(a => '<div class="alertbox" data-h="' + a.hex + '">' +
     '<svg class="i" viewBox="0 0 24 24"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"/></svg>' +
-    esc(a.call || a.reg || a.hex.toUpperCase()) + ' · ' + esc(SQ[a.sq] && ['7500','7600','7700'].includes(a.sq) ? 'Squawk ' + a.sq + ' ' + SQ[a.sq] : (EMG[a.emerg] || 'Urgence')) + '</div>').join(''));
+    esc(a.call || a.reg || a.hex.toUpperCase()) + ' · ' + esc(SQ[a.sq] && ['7500','7600','7700'].includes(a.sq) ? 'Squawk ' + a.sq + ' ' + SQ[a.sq] : (EMG[a.emerg] || 'Urgence')) + '</div>');
+  const ts = toasts.slice(-2).map(t => '<div class="alertbox ' + t.cls + '" data-h="' + t.hex + '">' + esc(t.txt) + '</div>');
+  setHTML($('#alerts'), em.concat(ts).join(''));
 }
 function renderStatus(){
   const el = $('#status');
@@ -798,7 +838,7 @@ function renderDetail(){
   setHTML($('#dHead'),
     '<div class="dh1"><div><div class="dcall">' + esc(a.call || a.reg || a.hex.toUpperCase()) + '</div>' +
     '<div class="dsub">' + esc([airline || a.op, a.desc].filter(Boolean).join(' · ') || 'Hex ' + a.hex.toUpperCase()) + '</div></div>' +
-    '<div class="dbtns"><button class="ib sm' + (follow ? ' on' : '') + '" data-act="follow" aria-label="Suivre l’avion"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>' +
+    '<div class="dbtns"><button class="ib sm' + (isWatched(a) ? ' on' : '') + '" data-act="watch" aria-label="Favori"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></button><button class="ib sm' + (follow ? ' on' : '') + '" data-act="follow" aria-label="Suivre l’avion"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>' +
     '<button class="ib sm" data-act="close" aria-label="Fermer la fiche"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div></div>' +
     '<div class="tags">' + tags.join('') + '</div>');
 
@@ -840,7 +880,7 @@ function renderDetail(){
     kv('Calage QNH', a.qnh != null ? a.qnh.toFixed(1) + ' hPa' : null) + kv('Altitude affichée AP', a.selAlt != null ? fAlt(a.selAlt) : null) + kv('Cap affiché AP', a.selHdg != null ? Math.round(a.selHdg) + '°' : null) +
     kv('Modes pilote auto', modes, '', true) +
     kv('Squawk', sqTxt, isEmerg(a) ? 'bad' : '', true) + kv('Urgence', a.emerg ? (EMG[a.emerg] || a.emerg) : null, 'bad') +
-    kv('Distance maison', fDist(a.dist)) + kv('Relèvement', Math.round(a.brg) + '°') + kv('Position', pos, '', true) +
+    kv('Distance maison', fDist(a.dist) + ' ' + card(a.brg)) + kv('Relèvement', Math.round(a.brg) + '°') + kv('Position', pos, '', true) +
     kv('Hex (ICAO)', a.hex.toUpperCase()) + kv('Année', a.year) + kv('Propriétaire', info && info.s === 'ok' ? esc(info.d.registered_owner) : null, '', true) +
     kv('Pays immat.', info && info.s === 'ok' ? esc(info.d.registered_owner_country_name) : null) +
     kv('Signal', a.rssi != null ? a.rssi.toFixed(1) + ' dBFS' : null) + kv('Vu il y a', a.seen != null ? a.seen.toFixed(1) + ' s' : null) + kv('Messages reçus', a.msgs != null ? nf.format(a.msgs) : null) +
@@ -890,17 +930,112 @@ function renderAcarsHtml(a){
   return h;
 }
 
+/* ---------- Alertes, favoris, recherche de vol ---------- */
+function unlockAudio(){
+  try {
+    if (!actx){ const C = window.AudioContext || window.webkitAudioContext; if (C) actx = new C(); }
+    if (actx && actx.state === 'suspended') actx.resume();
+  } catch(e){}
+}
+function beep(kind){
+  if (!S.alSnd) return; unlockAudio(); if (!actx) return;
+  const seq = kind === 'e' ? [[988, 0], [988, .28], [988, .56]] : kind === 'w' ? [[660, 0], [880, .2]] : [[523, 0], [392, .25]];
+  const t0 = actx.currentTime + .02, dur = kind === 'e' ? .2 : .3;
+  for (const [f, d] of seq){
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = kind === 'e' ? 'square' : 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0, t0 + d); g.gain.linearRampToValueAtTime(kind === 'e' ? .25 : .35, t0 + d + .02); g.gain.linearRampToValueAtTime(0, t0 + d + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t0 + d); o.stop(t0 + d + dur + .05);
+  }
+}
+function notify(title, body, tag){
+  if (!S.alNot || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try { new Notification(title, {body:body, tag:tag}); } catch(e){}
+}
+function checkAlerts(){
+  const now = Date.now(); let top = '';
+  for (const [k, t] of alerted) if (now - t > 1800000) alerted.delete(k);
+  for (const a of ac.values()){
+    if (a.lost) continue;
+    const nm = a.call || a.reg || a.hex.toUpperCase(), where = fDist(a.dist) + ' ' + card(a.brg), ev = [];
+    if (isEmerg(a)) ev.push(['e', 'e|' + a.hex + '|' + a.sq + '|' + a.emerg, 'Urgence · ' + nm, SQ[a.sq] && ['7500','7600','7700'].includes(a.sq) ? 'Squawk ' + a.sq + ' ' + SQ[a.sq] : (EMG[a.emerg] || 'Urgence')]);
+    if (isWatched(a)) ev.push(['w', 'w|' + a.hex, '★ ' + nm + ' dans la zone', where]);
+    if (S.alMil && a.mil) ev.push(['m', 'm|' + a.hex, 'Militaire · ' + nm, [a.type, where].filter(Boolean).join(' · ')]);
+    for (const [kind, key, title, body] of ev){
+      if (alerted.has(key)) continue;
+      alerted.set(key, now);
+      if (kind === 'm' && !firstDone) continue;
+      if (kind !== 'e') toasts.push({hex:a.hex, cls:kind, txt:title, until:now + 12000});
+      notify(title, body, key);
+      if (!top || kind === 'e' || (kind === 'w' && top === 'm')) top = kind;
+    }
+  }
+  if (top) beep(top);
+}
+function toggleWatch(a){
+  if (!a) return;
+  const w = (S.watch || []).slice();
+  if (isWatched(a)) S.watch = w.filter(e => !matchEntry(a, e));
+  else { S.watch = w.concat(a.call || a.reg || a.hex.toUpperCase()); alerted.set('w|' + a.hex, Date.now()); }
+  save(); $('#sWatch').value = S.watch.join(', '); renderAll();
+}
+const LOOK = ['https://api.adsb.one/v2/', 'https://api.adsb.lol/v2/', 'https://api.airplanes.live/v2/'];
+async function lookup(path){
+  for (const b of LOOK){
+    try {
+      const res = await fetch(b + path, {signal:sigTimeout(8000)});
+      if (!res.ok) continue;
+      const j = await res.json();
+      const l = (j.ac || j.aircraft || []).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number');
+      if (l.length) return l;
+    } catch(e){}
+  }
+  return [];
+}
+function adopt(o){
+  const t = Date.now(), a = norm(o, t); if (!a.hex) return null;
+  a.dist = hav(S.lat, S.lon, a.lat, a.lon); a.brg = brg(S.lat, S.lon, a.lat, a.lon);
+  const prev = ac.get(a.hex) || pinned.get(a.hex); a.first = prev ? prev.first : t;
+  pinned.set(a.hex, a); ac.set(a.hex, a); pushTrail(a);
+  return a;
+}
+async function globalFind(raw){
+  const q = (raw || '').replace(/\s+/g, '').toUpperCase(); if (!q) return;
+  msg('Recherche de ' + q + '…');
+  let list = [];
+  for (const c of [...new Set([q, ...icaoAll(q)])]){ list = await lookup('callsign/' + encodeURIComponent(c)); if (list.length) break; }
+  if (!list.length) list = await lookup('reg/' + encodeURIComponent(q));
+  if (!list.length && /^[0-9A-F]{6}$/.test(q)) list = await lookup('hex/' + q.toLowerCase());
+  if (!list.length){ msg(q + ' introuvable : pas en vol ou hors couverture.'); return; }
+  const a = adopt(list[0]); if (!a) return;
+  errMsg = ''; query = ''; $('#q').value = '';
+  select(a.hex);
+  map.setView(curPos(a), Math.max(map.getZoom(), 8));
+}
+async function refreshPinned(){
+  const now = Date.now();
+  for (const [h, old] of [...pinned]){
+    const cur = ac.get(h);
+    if (cur && cur !== old){ pinned.set(h, cur); continue; }
+    const l = await lookup('hex/' + h);
+    if (!pinned.has(h)) continue;
+    if (l.length) adopt(l[0]);
+    else if (now - old.t0 > 180000){ pinned.delete(h); ac.delete(h); }
+  }
+}
+
 /* ---------- Sélection ---------- */
 function select(h){
   if (!ac.has(h)) return;
   const was = selHex; selHex = h; if (was !== h) follow = false;
+  if (was && was !== h) pinned.delete(was);
   const a = ac.get(h);
   loadInfo(h); if (validCall(a.call)) pumpRoutes(); loadAcars(a, true);
   renderAll();
   const row = document.querySelector('.row[data-h="' + h + '"]'); if (row) row.scrollIntoView({block:'nearest'});
   const p = curPos(a); if (!map.getBounds().pad(-.15).contains(p)) map.panTo(p, {animate:true});
 }
-function deselect(){ selHex = null; follow = false; selLayer.clearLayers(); ahead = null; renderAll(); }
+function deselect(){ if (selHex) pinned.delete(selHex); selHex = null; follow = false; selLayer.clearLayers(); ahead = null; renderAll(); }
 
 /* ---------- Rendu global ---------- */
 function renderAll(){
@@ -915,6 +1050,7 @@ function tick(){
   $('#utc').textContent = n.toISOString().slice(11, 16) + ' UTC';
   renderStatus();
   if (selHex && S.key){ const a = ac.get(selHex); if (a) loadAcars(a, false); }
+  if (toasts.length) renderAlerts();
 }
 
 function move(){
@@ -924,6 +1060,7 @@ function move(){
     if (a){
       const p = curPos(a);
       if (ahead && a.hasTrk) ahead.setLatLngs([p, dest(p[0], p[1], a.trk, a.gs * KT * 300)]);
+      if (homeLine) homeLine.setLatLngs(gcPts([S.lat, S.lon], p, 24));
       if (follow) map.panTo(p, {animate:false});
     }
   } else if (follow){ const a = ac.get(selHex); if (a) map.panTo(curPos(a), {animate:true}); }
@@ -954,12 +1091,28 @@ $('#chips').addEventListener('click', e => {
 });
 $('#sort').addEventListener('change', e => { S.sort = e.target.value; save(); renderAll(); });
 $('#q').addEventListener('input', e => { query = e.target.value.trim(); renderAll(); });
-$('#list').addEventListener('click', e => { const b = e.target.closest('[data-h]'); if (b) select(b.dataset.h); });
+$('#q').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const qn = query.replace(/\s+/g, '').toUpperCase(); if (!qn) return;
+  const ic = icaoAll(qn), nh = qn.replace(/-/g, '');
+  const hit = filtered.find(a => {
+    const r = routes.get(a.call), ci = r && r.s === 'ok' ? (r.d.ciata || '').toUpperCase() : '', c = a.call.toUpperCase();
+    return c === qn || ic.includes(c) || ci === qn || a.hex.toUpperCase() === qn || (a.reg && a.reg.toUpperCase().replace(/-/g, '') === nh);
+  });
+  if (hit) select(hit.hex); else if (filtered.length === 1) select(filtered[0].hex); else if (!filtered.length) globalFind(query);
+  e.target.blur();
+});
+$('#list').addEventListener('click', e => {
+  if (e.target.closest('[data-global]')){ globalFind(query); return; }
+  const b = e.target.closest('[data-h]'); if (b) select(b.dataset.h);
+});
 $('#alerts').addEventListener('click', e => { const b = e.target.closest('[data-h]'); if (b) select(b.dataset.h); });
 $('#detail').addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   if (b.dataset.act === 'close') deselect();
   else if (b.dataset.act === 'follow'){ follow = !follow; if (follow){ const a = ac.get(selHex); if (a) map.panTo(curPos(a)); } renderDetail(); }
+  else if (b.dataset.act === 'watch') toggleWatch(ac.get(selHex));
   else if (b.dataset.act === 'settings') openSheet();
 });
 function setToggle(id, key){
@@ -985,6 +1138,8 @@ function fillSheet(){
   $('#sLat').value = S.lat; $('#sLon').value = S.lon; $('#sRadius').value = String(S.radius); $('#sUnits').value = S.units;
   $('#sRefresh').value = String(S.refresh); $('#sTheme').value = S.theme; $('#sSource').value = S.source; $('#sFKey').value = S.fkey || '';
   $('#sGround').checked = S.hideGround; $('#sExtrap').checked = S.extrap; $('#sAuto').checked = S.autoGeo;
+  $('#sRings').value = S.rings; $('#sAlSnd').checked = S.alSnd; $('#sAlMil').checked = S.alMil;
+  $('#sAlNot').checked = !!S.alNot && 'Notification' in window && Notification.permission === 'granted'; $('#sWatch').value = (S.watch || []).join(', ');
 }
 function openSheet(){ fillSheet(); $('#sheet').hidden = false; }
 function closeSheet(){ $('#sheet').hidden = true; }
@@ -1000,7 +1155,7 @@ const bind = (id, fn) => $(id).addEventListener('change', fn);
 bind('#sLat', e => { const v = parseFloat(e.target.value); if (isFinite(v) && v >= -90 && v <= 90){ S.lat = v; save(); recenter(); } });
 bind('#sLon', e => { const v = parseFloat(e.target.value); if (isFinite(v) && v >= -180 && v <= 180){ S.lon = v; save(); recenter(); } });
 bind('#sRadius', e => { S.radius = +e.target.value; save(); recenter(); });
-bind('#sUnits', e => { S.units = e.target.value; save(); buildLegend(); renderAll(); });
+bind('#sUnits', e => { S.units = e.target.value; save(); buildLegend(); drawRings(); renderAll(); });
 bind('#sRefresh', e => { S.refresh = +e.target.value; save(); schedule(); });
 bind('#sTheme', e => { S.theme = e.target.value; save(); applyTheme(); drawRings(); renderAll(); });
 bind('#sSource', e => { S.source = e.target.value; save(); poll(); });
@@ -1008,6 +1163,20 @@ bind('#sFKey', e => { S.fkey = e.target.value.trim(); save(); poll(); });
 bind('#sGround', e => { S.hideGround = e.target.checked; save(); renderAll(); });
 bind('#sAuto', e => { S.autoGeo = e.target.checked; save(); });
 bind('#sExtrap', e => { S.extrap = e.target.checked; save(); });
+bind('#sRings', e => { S.rings = e.target.value; save(); drawRings(); });
+bind('#sAlSnd', e => { S.alSnd = e.target.checked; save(); if (S.alSnd){ unlockAudio(); beep('w'); } });
+bind('#sAlMil', e => { S.alMil = e.target.checked; save(); });
+bind('#sAlNot', async e => {
+  const on = e.target.checked;
+  if (on){
+    if (!('Notification' in window)){ e.target.checked = false; msg('Notifications indisponibles sur ce navigateur.'); return; }
+    let p = Notification.permission;
+    if (p !== 'granted'){ try { p = await Notification.requestPermission(); } catch(err){ p = 'denied'; } }
+    if (p !== 'granted'){ e.target.checked = false; S.alNot = false; save(); msg('Notifications refusées.'); return; }
+  }
+  S.alNot = on; save();
+});
+bind('#sWatch', e => { S.watch = e.target.value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean); save(); renderAll(); });
 function useGeo(manual){
   if (!navigator.geolocation){ if (manual) msg('Position indisponible sur cet appareil.'); return; }
   navigator.geolocation.getCurrentPosition(p => {
@@ -1053,6 +1222,7 @@ document.addEventListener('visibilitychange', () => {
   wake(); if (Date.now() - lastOk > S.refresh * 1000) poll(); else schedule();
 });
 document.addEventListener('pointerdown', () => { if (!wl) wake(); }, {passive:true});
+document.addEventListener('pointerdown', unlockAudio, {passive:true});
 document.addEventListener('gesturestart', e => e.preventDefault());
 
 /* ---------- Démarrage ---------- */
