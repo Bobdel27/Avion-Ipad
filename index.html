@@ -1116,13 +1116,13 @@ async function openskyFind(q){
 }
 async function scanFind(q, gid, ptsOver, extra, what){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd), ...(extra || [])]);
-  const src = SOURCES.find(x => x.name === srcName) || (S.fkey ? SOURCES.find(x => x.id === 'fly') : null) || SOURCES[0];
+  const srcs = SOURCES.filter(x => x.id !== 'os' && (!x.needKey || S.fkey));
+  const cool = new Map(); let rot = 0;
   const pts = ptsOver || scanPoints();
-  let delay = 450, slow = false;
-  const one = async pt => {
+  const one = async (src, pt) => {
     try {
       const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(9000)});
-      if (r.status === 429){ note('balayage ' + src.name, 'HTTP 429'); return {st:429, wait:(+r.headers.get('Retry-After') || 0) * 1000}; }
+      if (r.status === 429){ note('balayage ' + src.name, 'HTTP 429'); return {st:429}; }
       if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return {st:r.status}; }
       const j = await r.json();
       note('balayage ' + src.name, 'ok');
@@ -1132,15 +1132,20 @@ async function scanFind(q, gid, ptsOver, extra, what){
   scanning = true;
   try {
     for (let i = 0; i < pts.length; i++){
-      let r, tries = 0;
-      do {
+      if (gid !== gfId) return [];
+      gmsg('Recherche de ' + q + (what || ' dans le monde') + '… ' + Math.round(i * 100 / pts.length) + ' %');
+      let done = false, guard = 0;
+      while (!done && guard++ < 40){
         if (gid !== gfId) return [];
-        gmsg('Recherche de ' + q + (what || ' dans le monde') + '… ' + Math.round(i * 100 / pts.length) + ' %' + (slow ? ' (ralenti : limite de requêtes)' : ''));
-        r = await one(pts[i]);
-        if (r.st === 429){ slow = true; delay = Math.min(delay * 2, 6000); await sleep(Math.max(delay, r.wait)); }
-      } while (r.st === 429 && ++tries < 6);
-      if (r.st === 200){ delay = Math.max(450, delay * 0.85); if (r.l.length) return r.l; }
-      await sleep(delay);
+        const now = Date.now();
+        const ready = srcs.filter(x => (cool.get(x.id) || 0) <= now);
+        if (!ready.length){ await sleep(500); continue; }
+        const src = ready[rot++ % ready.length];
+        const r = await one(src, pts[i]);
+        if (r.st === 200){ done = true; if (r.l.length) return r.l; }
+        else cool.set(src.id, Date.now() + (r.st === 429 ? 8000 : r.st === 0 ? 20000 : 60000));
+      }
+      await sleep(200);
     }
     return [];
   } finally { scanning = false; }
@@ -1166,9 +1171,12 @@ async function globalFindRun(raw, deep){
   const nd = q.replace(/-/g, '');
   let list = [];
   await learnAirline(q);
+  gmsg('Recherche de ' + q + ' (trajet)…');
+  const rt0 = /\d/.test(nd) ? await routeFor(q) : null;
+  if (id !== gfId) return;
   gmsg('Recherche de ' + q + ' (indicatif)…');
   const lookAny = async paths => (await Promise.all(paths.map(lookup))).find(l => l.length) || [];
-  list = await lookAny([...new Set([q, nd, ...icaoAll(nd)])].map(c => 'callsign/' + encodeURIComponent(c)));
+  list = await lookAny([...new Set([q, nd, ...icaoAll(nd), ...(rt0 && rt0.call ? [rt0.call] : [])])].map(c => 'callsign/' + encodeURIComponent(c)));
   if (id !== gfId) return;
   if (!list.length){
     gmsg('Recherche de ' + q + ' (immatriculation)…');
@@ -1185,7 +1193,7 @@ async function globalFindRun(raw, deep){
   let what = ' dans le monde';
   if (!list.length && deep && id === gfId){
     gmsg('Recherche du trajet de ' + q + '…');
-    const rt = await routeFor(q);
+    const rt = rt0;
     if (id !== gfId) return;
     if (rt) list = await scanFind(q, id, rt.pts, rt.call ? [rt.call] : [], ' sur son trajet (' + rt.label + ')');
     else what = ' dans le monde (trajet introuvable)';
