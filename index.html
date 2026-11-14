@@ -1065,10 +1065,35 @@ function scanPoints(){
   return pts.filter(p => { const k = Math.round(p[0] / 3) + ',' + Math.round(p[1] / 3); if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((x, y) => hav(S.lat, S.lon, x[0], x[1]) - hav(S.lat, S.lon, y[0], y[1]));
 }
-async function scanFind(q, gid){
-  const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd)]);
+function gcPoints(o, d){
+  const R = Math.PI / 180, n = Math.max(1, Math.ceil(hav(o.lat, o.lon, d.lat, d.lon) / 700));
+  const x1 = [Math.cos(o.lat * R) * Math.cos(o.lon * R), Math.cos(o.lat * R) * Math.sin(o.lon * R), Math.sin(o.lat * R)];
+  const x2 = [Math.cos(d.lat * R) * Math.cos(d.lon * R), Math.cos(d.lat * R) * Math.sin(d.lon * R), Math.sin(d.lat * R)];
+  const w = Math.acos(Math.max(-1, Math.min(1, x1[0] * x2[0] + x1[1] * x2[1] + x1[2] * x2[2]))) || 1e-6, out = [];
+  for (let i = 0; i <= n; i++){
+    const t = i / n, a = Math.sin((1 - t) * w) / Math.sin(w), b = Math.sin(t * w) / Math.sin(w);
+    const v = [a * x1[0] + b * x2[0], a * x1[1] + b * x2[1], a * x1[2] + b * x2[2]];
+    out.push([+(Math.atan2(v[2], Math.hypot(v[0], v[1])) / R).toFixed(2), +(Math.atan2(v[1], v[0]) / R).toFixed(2)]);
+  }
+  return out.sort((p, q) => hav(S.lat, S.lon, p[0], p[1]) - hav(S.lat, S.lon, q[0], q[1]));
+}
+async function routeFor(q){
+  const nd = q.replace(/-/g, '');
+  const rs = await Promise.all([...new Set([q, nd, ...icaoAll(nd)])].map(async c => {
+    try {
+      const res = await fetch('https://api.adsbdb.com/v0/callsign/' + encodeURIComponent(c), {signal:sigTimeout(7000)});
+      if (!res.ok) return null;
+      const j = await res.json(), r = parseRoute(j);
+      return r && r.o && r.d && typeof r.o.lat === 'number' && typeof r.d.lat === 'number' ? {r:r, call:(j.response.flightroute.callsign || '').toUpperCase()} : null;
+    } catch(e){ return null; }
+  }));
+  const ok = rs.find(Boolean); if (!ok) return null;
+  return {pts:gcPoints(ok.r.o, ok.r.d), call:ok.call, label:(ok.r.o.city || ok.r.o.iata) + ' → ' + (ok.r.d.city || ok.r.d.iata)};
+}
+async function scanFind(q, gid, ptsOver, extra, what){
+  const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd), ...(extra || [])]);
   const src = SOURCES.find(x => x.name === srcName) || (S.fkey ? SOURCES.find(x => x.id === 'fly') : null) || SOURCES[0];
-  const pts = scanPoints();
+  const pts = ptsOver || scanPoints();
   let delay = 450, slow = false;
   const one = async pt => {
     try {
@@ -1086,7 +1111,7 @@ async function scanFind(q, gid){
       let r, tries = 0;
       do {
         if (gid !== gfId) return [];
-        gmsg('Recherche de ' + q + ' dans le monde… ' + Math.round(i * 100 / pts.length) + ' %' + (slow ? ' (ralenti : limite de requêtes)' : ''));
+        gmsg('Recherche de ' + q + (what || ' dans le monde') + '… ' + Math.round(i * 100 / pts.length) + ' %' + (slow ? ' (ralenti : limite de requêtes)' : ''));
         r = await one(pts[i]);
         if (r.st === 429){ slow = true; delay = Math.min(delay * 2, 6000); await sleep(Math.max(delay, r.wait)); }
       } while (r.st === 429 && ++tries < 6);
@@ -1127,6 +1152,12 @@ async function globalFindRun(raw, deep){
   }
   if (id !== gfId) return;
   if (!list.length && /^[0-9A-F]{6}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
+  if (!list.length && deep && id === gfId){
+    gmsg('Recherche du trajet de ' + q + '…');
+    const rt = await routeFor(q);
+    if (id !== gfId) return;
+    if (rt) list = await scanFind(q, id, rt.pts, rt.call ? [rt.call] : [], ' sur son trajet (' + rt.label + ')');
+  }
   if (!list.length && deep && id === gfId) list = await scanFind(q, id);
   if (id !== gfId) return;
   if (!list.length){ gmsg(q + ' introuvable. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
