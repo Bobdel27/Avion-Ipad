@@ -1031,19 +1031,24 @@ const LOOK = [
 let lookErr = '', lookStats = {};
 const note = (n, st) => { const k = n + ' ' + st; lookStats[k] = (lookStats[k] || 0) + 1; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function lookup(path){
+function lookup(path){
   const bases = (S.fkey ? [{n:'FlyItalyADSB', u:p => 'https://api.flyitalyadsb.com/v2/' + p, h:{'X-Api-Key':S.fkey}}] : []).concat(LOOK);
-  for (const x of bases){
-    try {
-      const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(8000)});
-      if (!res.ok){ note(x.n, 'HTTP ' + res.status); continue; }
-      const j = await res.json();
-      const l = (j.ac || j.aircraft || []).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number');
-      note(x.n, l.length ? 'trouvé' : 'vide');
-      if (l.length) return l;
-    } catch(e){ note(x.n, 'bloqué'); }
-  }
-  return [];
+  return new Promise(resolve => {
+    let left = bases.length, done = false;
+    bases.forEach(async x => {
+      try {
+        const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(6000)});
+        if (!res.ok) note(x.n, 'HTTP ' + res.status);
+        else {
+          const j = await res.json();
+          const l = (j.ac || j.aircraft || []).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number');
+          note(x.n, l.length ? 'trouvé' : 'vide');
+          if (l.length && !done){ done = true; resolve(l); }
+        }
+      } catch(e){ note(x.n, 'bloqué'); }
+      finally { if (--left === 0 && !done) resolve([]); }
+    });
+  });
 }
 function scanPoints(){
   const boxes = [[30,62,-12,45],[18,40,-18,60],[22,52,-128,-65],[8,30,-110,-60],[-35,8,-80,-35],[10,50,60,100],[15,50,100,146],[-40,-10,112,155],[-35,15,10,50]];
@@ -1104,11 +1109,14 @@ async function globalFindRun(raw, deep){
   const id = ++gfId; lookStats = {}; gmsg('Recherche de ' + q + '…');
   const nd = q.replace(/-/g, '');
   let list = [];
-  for (const c of [...new Set([q, nd, ...icaoAll(nd)])]){ list = await lookup('callsign/' + encodeURIComponent(c)); if (list.length || id !== gfId) break; }
+  gmsg('Recherche de ' + q + ' (indicatif)…');
+  const lookAny = async paths => (await Promise.all(paths.map(lookup))).find(l => l.length) || [];
+  list = await lookAny([...new Set([q, nd, ...icaoAll(nd)])].map(c => 'callsign/' + encodeURIComponent(c)));
   if (id !== gfId) return;
   if (!list.length){
+    gmsg('Recherche de ' + q + ' (immatriculation)…');
     const regs = [...new Set([q, nd, nd.length > 2 ? nd.slice(0, 1) + '-' + nd.slice(1) : '', nd.length > 3 ? nd.slice(0, 2) + '-' + nd.slice(2) : ''].filter(Boolean))];
-    for (const r of regs){ list = await lookup('reg/' + encodeURIComponent(r)); if (list.length || id !== gfId) break; }
+    list = await lookAny(regs.map(r => 'reg/' + encodeURIComponent(r)));
   }
   if (id !== gfId) return;
   if (!list.length && /^[0-9A-F]{6}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
