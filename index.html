@@ -406,7 +406,7 @@ const HELI = 'M12 5.5c1.9 0 3 1.4 3 3.2V14c0 1.8-1.1 3.2-3 3.2S9 15.8 9 14V8.7c0
 
 /* ---------- État ---------- */
 let ac = new Map(), trails = new Map(), markers = new Map();
-let filtered = [], filteredSet = new Set();
+let filtered = [], mapList = [], filteredSet = new Set();
 let selHex = null, follow = false;
 let dc = {lat:S.lat, lon:S.lon}, dr = S.radius;
 let lastOk = 0, errMsg = '', busy = false, timer = 0, srcIdx = 0, srcName = '';
@@ -545,7 +545,9 @@ function sigTimeout(ms){
   if (AbortSignal.timeout) return AbortSignal.timeout(ms);
   const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal;
 }
+let scanning = false;
 async function poll(){
+  if (scanning){ schedule(); return; }
   if (busy) return; busy = true;
   const usable = SOURCES.filter(s => !s.needKey || S.fkey);
   const order = S.source === 'auto' ? usable.map((_, i) => usable[(srcIdx + i) % usable.length]) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
@@ -691,7 +693,7 @@ function styleMarker(m, a){
 }
 function syncMap(){
   const vis = new Set();
-  for (const a of filtered){
+  for (const a of mapList){
     vis.add(a.hex);
     let m = markers.get(a.hex); const p = curPos(a);
     if (!m){
@@ -716,7 +718,7 @@ function syncMap(){
 function layoutLabels(){
   if (!S.labels || map.getZoom() < 6) return;
   const sz = map.getSize(), items = [];
-  for (const a of filtered){
+  for (const a of mapList){
     const m = markers.get(a.hex), el = m && m.getElement(); if (!el || !el.firstChild) continue;
     items.push({a:a, el:el, lb:el.firstChild.lastChild, p:map.latLngToContainerPoint(m.getLatLng()), pr:a.hex === selHex ? 3 : isEmerg(a) ? 2 : isWatched(a) ? 1 : 0});
   }
@@ -770,7 +772,7 @@ function drawSel(){
 /* ---------- Filtres et liste ---------- */
 const FILTERS = [['all','Tous'],['air','En vol'],['gnd','Au sol'],['mil','Militaires'],['heli','Hélicos'],['emg','Urgences']];
 let query = '';
-function passes(a){
+function passes(a, noq){
   if (pinned.has(a.hex)) return true;
   if (S.hideGround && a.ground && a.hex !== selHex) return false;
   switch (S.filter){
@@ -781,7 +783,7 @@ function passes(a){
     case 'heli': if (a.cat !== 'A7') return false; break;
     case 'emg': if (!isEmerg(a)) return false; break;
   }
-  if (query){
+  if (query && !noq){
     const q = query.toLowerCase(), qn = q.replace(/\s+/g, ''), qis = icaoAll(qn.toUpperCase()).map(x => x.toLowerCase());
     const r = routes.get(a.call), ci = r && r.s === 'ok' ? (r.d.ciata || '').toLowerCase() : '', c = a.call.toLowerCase();
     if (!(c.includes(qn) || qis.some(x => c.includes(x)) || (ci && ci.includes(qn)) || a.reg.toLowerCase().replace(/-/g, '').includes(qn.replace(/-/g, '')) || a.hex.includes(qn) || a.type.toLowerCase().includes(q) || a.op.toLowerCase().includes(q))) return false;
@@ -789,13 +791,13 @@ function passes(a){
   return true;
 }
 function computeFiltered(){
-  const arr = [...ac.values()].filter(passes);
+  const arr = [...ac.values()].filter(a => passes(a, true));
   const k = S.sort;
   arr.sort((a, b) =>
     k === 'alt' ? (b.alt ?? -1) - (a.alt ?? -1) :
     k === 'spd' ? (b.gs ?? -1) - (a.gs ?? -1) :
     k === 'call' ? (a.call || 'zzz').localeCompare(b.call || 'zzz') : a.dist - b.dist);
-  filtered = arr; filteredSet = new Set(arr.map(a => a.hex));
+  mapList = arr; filtered = query ? arr.filter(a => passes(a)) : arr; filteredSet = new Set(filtered.map(a => a.hex));
 }
 function renderChips(){
   $('#bFav').setAttribute('aria-pressed', S.filter === 'fav');
@@ -1058,6 +1060,8 @@ async function scanFind(q, gid){
       return (src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)));
     } catch(e){ lookErr = e.message || 'réseau'; return []; }
   };
+  scanning = true;
+  try {
   for (let i = 0; i < pts.length; i += N){
     if (gid !== gfId) return [];
     msg('Recherche de ' + q + ' dans le monde… ' + Math.round(i * 100 / pts.length) + ' %');
@@ -1066,6 +1070,7 @@ async function scanFind(q, gid){
     await sleep(350);
   }
   return [];
+  } finally { scanning = false; }
 }
 function adopt(o){
   const t = Date.now(), a = norm(o, t); if (!a.hex) return null;
