@@ -1068,27 +1068,32 @@ function scanPoints(){
 async function scanFind(q, gid){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd)]);
   const src = SOURCES.find(x => x.name === srcName) || (S.fkey ? SOURCES.find(x => x.id === 'fly') : null) || SOURCES[0];
-  const pts = scanPoints(), N = 4;
-  const one = async (pt, retry) => {
+  const pts = scanPoints();
+  let delay = 450, slow = false;
+  const one = async pt => {
     try {
       const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(9000)});
-      if (r.status === 429 && retry){ await sleep(1500); return one(pt, false); }
-      if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return []; }
+      if (r.status === 429){ note('balayage ' + src.name, 'HTTP 429'); return {st:429, wait:(+r.headers.get('Retry-After') || 0) * 1000}; }
+      if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return {st:r.status}; }
       const j = await r.json();
       note('balayage ' + src.name, 'ok');
-      return (src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)));
-    } catch(e){ note('balayage ' + src.name, 'bloqué'); return []; }
+      return {st:200, l:(src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)))};
+    } catch(e){ note('balayage ' + src.name, 'bloqué'); return {st:0}; }
   };
   scanning = true;
   try {
-  for (let i = 0; i < pts.length; i += N){
-    if (gid !== gfId) return [];
-    gmsg('Recherche de ' + q + ' dans le monde… ' + Math.round(i * 100 / pts.length) + ' %');
-    const l = (await Promise.all(pts.slice(i, i + N).map(pt => one(pt, true)))).flat();
-    if (l.length) return l;
-    await sleep(150);
-  }
-  return [];
+    for (let i = 0; i < pts.length; i++){
+      let r, tries = 0;
+      do {
+        if (gid !== gfId) return [];
+        gmsg('Recherche de ' + q + ' dans le monde… ' + Math.round(i * 100 / pts.length) + ' %' + (slow ? ' (ralenti : limite de requêtes)' : ''));
+        r = await one(pts[i]);
+        if (r.st === 429){ slow = true; delay = Math.min(delay * 2, 6000); await sleep(Math.max(delay, r.wait)); }
+      } while (r.st === 429 && ++tries < 6);
+      if (r.st === 200){ delay = Math.max(450, delay * 0.85); if (r.l.length) return r.l; }
+      await sleep(delay);
+    }
+    return [];
   } finally { scanning = false; }
 }
 function adopt(o){
