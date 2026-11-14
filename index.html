@@ -1122,7 +1122,7 @@ async function scanFind(q, gid, ptsOver, extra, what){
   const pts = ptsOver || scanPoints();
   const one = async (src, pt) => {
     try {
-      const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(9000)});
+      const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(5000)});
       if (r.status === 429){ note('balayage ' + src.name, 'HTTP 429'); return {st:429}; }
       if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return {st:r.status}; }
       const j = await r.json();
@@ -1141,17 +1141,17 @@ async function scanFind(q, gid, ptsOver, extra, what){
       while (!done && !found && guard++ < 40){
         if (gid !== gfId) return;
         const now = Date.now();
-        const ready = srcs.filter(x => (cool.get(x.id) || 0) <= now);
-        if (!ready.length){ await sleep(500); continue; }
+        const rd = srcs.filter(x => (cool.get(x.id) || 0) <= now), dir = rd.filter(x => x.id[0] !== 'p'), ready = dir.length ? dir : rd;
+        if (!ready.length){ await sleep(400); continue; }
         const src = ready[rot++ % ready.length];
         const r = await one(src, pts[i]);
         if (r.st === 200){ done = true; if (r.l.length) found = r.l; }
-        else cool.set(src.id, Date.now() + (r.st === 429 ? 8000 : r.st === 0 ? 20000 : 60000));
+        else cool.set(src.id, Date.now() + (r.st === 429 ? 6000 : r.st === 0 ? 120000 : 120000));
       }
-      await sleep(150);
+      await sleep(60);
     }
   };
-  await Promise.all([worker(), worker(), worker(), worker()]);
+  await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
   return gid !== gfId ? [] : (found || []);
 }
 function adopt(o){
