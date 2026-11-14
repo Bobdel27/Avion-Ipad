@@ -1052,15 +1052,15 @@ function lookup(path){
     let left = bases.length, done = false;
     bases.forEach(async x => {
       try {
-        const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(6000)});
-        if (!res.ok){ note(x.n, 'HTTP ' + res.status); if ([401, 403, 404].includes(res.status)) deadSrc.add(x.n); }
+        const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(10000)});
+        if (!res.ok){ note(x.n, 'HTTP ' + res.status); if ([401, 403].includes(res.status)) deadSrc.add(x.n); }
         else {
           const j = await res.json();
           const l = (j.ac || j.aircraft || []).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number');
           note(x.n, l.length ? 'trouvé' : 'vide');
           if (l.length && !done){ done = true; resolve(l); }
         }
-      } catch(e){ note(x.n, 'bloqué'); deadSrc.add(x.n); }
+      } catch(e){ note(x.n, 'bloqué'); }
       finally { if (--left === 0 && !done) resolve([]); }
     });
   });
@@ -1112,7 +1112,7 @@ async function openskyFind(q){
     const l = os.parse(await r.json()).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.hex && o.hex.toUpperCase() === nd)));
     note('OpenSky (monde)', l.length ? 'trouvé' : 'vide');
     return l;
-  } catch(e){ note('OpenSky (monde)', 'bloqué'); deadSrc.add('OpenSky'); return []; }
+  } catch(e){ note('OpenSky (monde)', 'bloqué'); return []; }
 }
 async function scanFind(q, gid, ptsOver, extra, what){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd), ...(extra || [])]);
