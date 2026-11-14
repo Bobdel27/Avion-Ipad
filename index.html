@@ -1018,9 +1018,10 @@ function toggleWatch(a){
 }
 const LOOK = ['https://api.adsb.one/v2/', 'https://api.adsb.lol/v2/', 'https://api.airplanes.live/v2/'];
 async function lookup(path){
-  for (const b of LOOK){
+  const bases = (S.fkey ? [{b:'https://api.flyitalyadsb.com/v2/', h:{'X-Api-Key':S.fkey}}] : []).concat(LOOK.map(b => ({b:b})));
+  for (const x of bases){
     try {
-      const res = await fetch(b + path, {signal:sigTimeout(8000)});
+      const res = await fetch(x.b + path, {headers:x.h, signal:sigTimeout(8000)});
       if (!res.ok) continue;
       const j = await res.json();
       const l = (j.ac || j.aircraft || []).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number');
