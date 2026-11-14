@@ -1031,21 +1031,23 @@ const LOOK = [
 let lookErr = '', lookStats = {};
 const note = (n, st) => { const k = n + ' ' + st; lookStats[k] = (lookStats[k] || 0) + 1; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const deadSrc = new Set();
 function lookup(path){
-  const bases = (S.fkey ? [{n:'FlyItalyADSB', u:p => 'https://api.flyitalyadsb.com/v2/' + p, h:{'X-Api-Key':S.fkey}}] : []).concat(LOOK);
+  const bases = ((S.fkey ? [{n:'FlyItalyADSB', u:p => 'https://api.flyitalyadsb.com/v2/' + p, h:{'X-Api-Key':S.fkey}}] : []).concat(LOOK)).filter(x => !deadSrc.has(x.n));
   return new Promise(resolve => {
+    if (!bases.length) return resolve([]);
     let left = bases.length, done = false;
     bases.forEach(async x => {
       try {
         const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(6000)});
-        if (!res.ok) note(x.n, 'HTTP ' + res.status);
+        if (!res.ok){ note(x.n, 'HTTP ' + res.status); if ([401, 403, 404].includes(res.status)) deadSrc.add(x.n); }
         else {
           const j = await res.json();
           const l = (j.ac || j.aircraft || []).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number');
           note(x.n, l.length ? 'trouvé' : 'vide');
           if (l.length && !done){ done = true; resolve(l); }
         }
-      } catch(e){ note(x.n, 'bloqué'); }
+      } catch(e){ note(x.n, 'bloqué'); deadSrc.add(x.n); }
       finally { if (--left === 0 && !done) resolve([]); }
     });
   });
@@ -1066,7 +1068,7 @@ function scanPoints(){
 async function scanFind(q, gid){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd)]);
   const src = SOURCES.find(x => x.name === srcName) || (S.fkey ? SOURCES.find(x => x.id === 'fly') : null) || SOURCES[0];
-  const pts = scanPoints(), N = 2;
+  const pts = scanPoints(), N = 4;
   const one = async (pt, retry) => {
     try {
       const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(9000)});
@@ -1084,7 +1086,7 @@ async function scanFind(q, gid){
     gmsg('Recherche de ' + q + ' dans le monde… ' + Math.round(i * 100 / pts.length) + ' %');
     const l = (await Promise.all(pts.slice(i, i + N).map(pt => one(pt, true)))).flat();
     if (l.length) return l;
-    await sleep(350);
+    await sleep(150);
   }
   return [];
   } finally { scanning = false; }
@@ -1212,10 +1214,10 @@ $('#bFav').addEventListener('click', () => {
 });
 $('#sort').addEventListener('change', e => { S.sort = e.target.value; save(); renderAll(); });
 $('#q').addEventListener('input', e => {
-  query = e.target.value.trim(); gfText = ''; renderAll();
+  query = e.target.value.trim(); gfText = ''; gfId++; renderAll();
   clearTimeout(gfTimer);
   const k = query.replace(/\s+/g, '');
-  if (/^[A-Za-z0-9-]{3,8}$/.test(k) && /\d/.test(k)) gfTimer = setTimeout(() => { if (query && !filtered.length) globalFind(query, false); }, 900);
+  if (/^[A-Za-z0-9-]{3,8}$/.test(k) && /\d/.test(k)) gfTimer = setTimeout(() => { if (query && !filtered.length) globalFind(query, true); }, 900);
 });
 $('#q').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
@@ -1231,7 +1233,7 @@ $('#q').addEventListener('keydown', e => {
   e.target.blur();
 });
 $('#list').addEventListener('click', e => {
-  if (e.target.closest('[data-global]')){ globalFind(query, true); return; }
+  if (e.target.closest('[data-global]')){ deadSrc.clear(); globalFind(query, true); return; }
   const b = e.target.closest('[data-h]'); if (b) select(b.dataset.h);
 });
 $('#alerts').addEventListener('click', e => { const b = e.target.closest('[data-h]'); if (b) select(b.dataset.h); });
