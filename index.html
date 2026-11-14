@@ -1090,6 +1090,17 @@ async function routeFor(q){
   const ok = rs.find(Boolean); if (!ok) return null;
   return {pts:gcPoints(ok.r.o, ok.r.d), call:ok.call, label:(ok.r.o.city || ok.r.o.iata) + ' → ' + (ok.r.d.city || ok.r.d.iata)};
 }
+async function openskyFind(q){
+  if (deadSrc.has('OpenSky')) return [];
+  const os = SOURCES.find(x => x.id === 'os'), nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd)]);
+  try {
+    const r = await fetch('https://opensky-network.org/api/states/all', {signal:sigTimeout(25000)});
+    if (!r.ok){ note('OpenSky (monde)', 'HTTP ' + r.status); if ([401, 403].includes(r.status)) deadSrc.add('OpenSky'); return []; }
+    const l = os.parse(await r.json()).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.hex && o.hex.toUpperCase() === nd)));
+    note('OpenSky (monde)', l.length ? 'trouvé' : 'vide');
+    return l;
+  } catch(e){ note('OpenSky (monde)', 'bloqué'); deadSrc.add('OpenSky'); return []; }
+}
 async function scanFind(q, gid, ptsOver, extra, what){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd), ...(extra || [])]);
   const src = SOURCES.find(x => x.name === srcName) || (S.fkey ? SOURCES.find(x => x.id === 'fly') : null) || SOURCES[0];
@@ -1153,12 +1164,19 @@ async function globalFindRun(raw, deep){
   if (id !== gfId) return;
   if (!list.length && /^[0-9A-F]{6}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
   if (!list.length && deep && id === gfId){
+    gmsg('Recherche de ' + q + ' dans le monde entier (OpenSky)…');
+    list = await openskyFind(q);
+  }
+  if (id !== gfId) return;
+  let what = ' dans le monde';
+  if (!list.length && deep && id === gfId){
     gmsg('Recherche du trajet de ' + q + '…');
     const rt = await routeFor(q);
     if (id !== gfId) return;
     if (rt) list = await scanFind(q, id, rt.pts, rt.call ? [rt.call] : [], ' sur son trajet (' + rt.label + ')');
+    else what = ' dans le monde (trajet introuvable)';
   }
-  if (!list.length && deep && id === gfId) list = await scanFind(q, id);
+  if (!list.length && deep && id === gfId) list = await scanFind(q, id, null, null, what);
   if (id !== gfId) return;
   if (!list.length){ gmsg(q + ' introuvable. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
   const a = adopt(list[0]); if (!a) return;
