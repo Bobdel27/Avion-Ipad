@@ -1030,6 +1030,37 @@ async function lookup(path){
   }
   return [];
 }
+function scanPoints(){
+  const boxes = [[30,62,-12,45],[18,40,-18,60],[22,52,-128,-65],[8,30,-110,-60],[-35,8,-80,-35],[10,50,60,100],[15,50,100,146],[-40,-10,112,155],[-35,15,10,50]];
+  const pts = [], st = 6.5;
+  for (const [la0, la1, lo0, lo1] of boxes){
+    for (let la = la0; la <= la1; la += st){
+      const ls = st / Math.max(.4, Math.cos(la * Math.PI / 180));
+      for (let lo = lo0; lo <= lo1; lo += ls) pts.push([+la.toFixed(1), +lo.toFixed(1)]);
+    }
+  }
+  const seen = new Set();
+  return pts.filter(p => { const k = Math.round(p[0] / 3) + ',' + Math.round(p[1] / 3); if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((x, y) => hav(S.lat, S.lon, x[0], x[1]) - hav(S.lat, S.lon, y[0], y[1]));
+}
+async function scanFind(q){
+  const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd)]);
+  const src = SOURCES.find(x => x.name === srcName) || (S.fkey ? SOURCES.find(x => x.id === 'fly') : null) || SOURCES[0];
+  const pts = scanPoints(), N = 5;
+  for (let i = 0; i < pts.length; i += N){
+    msg('Recherche de ' + q + ' dans le monde… ' + Math.round(i * 100 / pts.length) + ' %');
+    const res = await Promise.all(pts.slice(i, i + N).map(async pt => {
+      try {
+        const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(9000)});
+        if (!r.ok) return [];
+        const j = await r.json();
+        return (src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)));
+      } catch(e){ return []; }
+    }));
+    const l = res.flat(); if (l.length) return l;
+  }
+  return [];
+}
 function adopt(o){
   const t = Date.now(), a = norm(o, t); if (!a.hex) return null;
   a.dist = hav(S.lat, S.lon, a.lat, a.lon); a.brg = brg(S.lat, S.lon, a.lat, a.lon);
@@ -1050,6 +1081,7 @@ async function globalFind(raw){
       for (const r of regs){ list = await lookup('reg/' + encodeURIComponent(r)); if (list.length) break; }
     }
     if (!list.length && /^[0-9A-F]{6}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
+    if (!list.length) list = await scanFind(q);
     if (!list.length){ msg(q + ' introuvable : pas en vol ou hors couverture.'); return; }
     const a = adopt(list[0]); if (!a) return;
     errMsg = ''; query = ''; $('#q').value = '';
