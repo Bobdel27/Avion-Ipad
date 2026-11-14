@@ -1019,18 +1019,20 @@ function toggleWatch(a){
   save(); $('#sWatch').value = S.watch.join(', '); renderAll();
 }
 const LOOK = ['https://api.adsb.one/v2/', 'https://api.adsb.lol/v2/', 'https://api.airplanes.live/v2/'];
-let lookErr = '';
+let lookErr = '', lookStats = {};
+const note = (n, st) => { const k = n + ' ' + st; lookStats[k] = (lookStats[k] || 0) + 1; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function lookup(path){
-  const bases = (S.fkey ? [{b:'https://api.flyitalyadsb.com/v2/', h:{'X-Api-Key':S.fkey}}] : []).concat(LOOK.map(b => ({b:b})));
+  const bases = (S.fkey ? [{n:'FlyItalyADSB', b:'https://api.flyitalyadsb.com/v2/', h:{'X-Api-Key':S.fkey}}] : []).concat(LOOK.map(b => ({n:b.split('/')[2].replace('api.', ''), b:b})));
   for (const x of bases){
     try {
       const res = await fetch(x.b + path, {headers:x.h, signal:sigTimeout(8000)});
-      if (!res.ok){ lookErr = 'HTTP ' + res.status; continue; }
+      if (!res.ok){ note(x.n, 'HTTP ' + res.status); continue; }
       const j = await res.json();
       const l = (j.ac || j.aircraft || []).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number');
+      note(x.n, l.length ? 'trouvé' : 'vide');
       if (l.length) return l;
-    } catch(e){ lookErr = e.message || 'réseau'; }
+    } catch(e){ note(x.n, 'bloqué'); }
   }
   return [];
 }
@@ -1055,10 +1057,11 @@ async function scanFind(q, gid){
     try {
       const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(9000)});
       if (r.status === 429 && retry){ await sleep(1500); return one(pt, false); }
-      if (!r.ok){ lookErr = 'HTTP ' + r.status; return []; }
+      if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return []; }
       const j = await r.json();
+      note('balayage ' + src.name, 'ok');
       return (src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)));
-    } catch(e){ lookErr = e.message || 'réseau'; return []; }
+    } catch(e){ note('balayage ' + src.name, 'bloqué'); return []; }
   };
   scanning = true;
   try {
@@ -1082,7 +1085,7 @@ function adopt(o){
 let gfId = 0;
 async function globalFind(raw, deep){
   const q = (raw || '').replace(/\s+/g, '').toUpperCase(); if (!q) return;
-  const id = ++gfId; lookErr = ''; msg('Recherche de ' + q + '…');
+  const id = ++gfId; lookStats = {}; msg('Recherche de ' + q + '…');
   const nd = q.replace(/-/g, '');
   let list = [];
   for (const c of [...new Set([q, nd, ...icaoAll(nd)])]){ list = await lookup('callsign/' + encodeURIComponent(c)); if (list.length || id !== gfId) break; }
@@ -1095,7 +1098,7 @@ async function globalFind(raw, deep){
   if (!list.length && /^[0-9A-F]{6}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
   if (!list.length && deep && id === gfId) list = await scanFind(q, id);
   if (id !== gfId) return;
-  if (!list.length){ msg(q + ' introuvable : pas en vol ou hors couverture' + (lookErr ? ' (erreur : ' + lookErr + ')' : '') + '.'); return; }
+  if (!list.length){ msg(q + ' introuvable. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
   const a = adopt(list[0]); if (!a) return;
   errMsg = ''; query = ''; $('#q').value = '';
   select(a.hex);
@@ -1286,7 +1289,7 @@ function useGeo(manual){
   }, () => { if (manual) msg('Position refusée. Autorise-la dans Réglages > Safari > Position.'); }, {timeout:10000, maximumAge:600000});
 }
 let msgT = 0;
-function msg(t){ errMsg = t; renderStatus(); clearTimeout(msgT); msgT = setTimeout(() => { errMsg = ''; renderStatus(); }, 6000); }
+function msg(t, ms){ errMsg = t; renderStatus(); clearTimeout(msgT); msgT = setTimeout(() => { errMsg = ''; renderStatus(); }, ms || 6000); }
 $('#sGeo').addEventListener('click', () => useGeo(true));
 $('#bGeo').addEventListener('click', () => useGeo(true));
 let cTimer = 0, cSeq = 0;
