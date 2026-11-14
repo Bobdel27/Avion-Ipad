@@ -1129,26 +1129,29 @@ async function scanFind(q, gid, ptsOver, extra, what){
       return {st:200, l:(src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && ((o.flight && calls.has(o.flight.trim().toUpperCase())) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)))};
     } catch(e){ note('balayage ' + src.name, 'bloqué'); return {st:0}; }
   };
-  scanning = true;
-  try {
-    for (let i = 0; i < pts.length; i++){
-      if (gid !== gfId) return [];
+  scanning = false;
+  let next = 0, found = null;
+  const worker = async () => {
+    while (!found && next < pts.length){
+      if (gid !== gfId) return;
+      const i = next++;
       gmsg('Recherche de ' + q + (what || ' dans le monde') + '… ' + Math.round(i * 100 / pts.length) + ' %');
       let done = false, guard = 0;
-      while (!done && guard++ < 40){
-        if (gid !== gfId) return [];
+      while (!done && !found && guard++ < 40){
+        if (gid !== gfId) return;
         const now = Date.now();
         const ready = srcs.filter(x => (cool.get(x.id) || 0) <= now);
         if (!ready.length){ await sleep(500); continue; }
         const src = ready[rot++ % ready.length];
         const r = await one(src, pts[i]);
-        if (r.st === 200){ done = true; if (r.l.length) return r.l; }
+        if (r.st === 200){ done = true; if (r.l.length) found = r.l; }
         else cool.set(src.id, Date.now() + (r.st === 429 ? 8000 : r.st === 0 ? 20000 : 60000));
       }
-      await sleep(200);
+      await sleep(150);
     }
-    return [];
-  } finally { scanning = false; }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return gid !== gfId ? [] : (found || []);
 }
 function adopt(o){
   const t = Date.now(), a = norm(o, t); if (!a.hex) return null;
