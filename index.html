@@ -1036,18 +1036,25 @@ function adopt(o){
   pinned.set(a.hex, a); ac.set(a.hex, a); pushTrail(a);
   return a;
 }
+let gfBusy = false;
 async function globalFind(raw){
-  const q = (raw || '').replace(/\s+/g, '').toUpperCase(); if (!q) return;
-  msg('Recherche de ' + q + '…');
-  let list = [];
-  for (const c of [...new Set([q, ...icaoAll(q)])]){ list = await lookup('callsign/' + encodeURIComponent(c)); if (list.length) break; }
-  if (!list.length) list = await lookup('reg/' + encodeURIComponent(q));
-  if (!list.length && /^[0-9A-F]{6}$/.test(q)) list = await lookup('hex/' + q.toLowerCase());
-  if (!list.length){ msg(q + ' introuvable : pas en vol ou hors couverture.'); return; }
-  const a = adopt(list[0]); if (!a) return;
-  errMsg = ''; query = ''; $('#q').value = '';
-  select(a.hex);
-  map.setView(curPos(a), Math.max(map.getZoom(), 8));
+  const q = (raw || '').replace(/\s+/g, '').toUpperCase(); if (!q || gfBusy) return;
+  gfBusy = true; msg('Recherche de ' + q + '…');
+  try {
+    let list = [];
+    const nd = q.replace(/-/g, '');
+    for (const c of [...new Set([q, nd, ...icaoAll(nd)])]){ list = await lookup('callsign/' + encodeURIComponent(c)); if (list.length) break; }
+    if (!list.length){
+      const regs = [...new Set([q, nd, nd.length > 2 ? nd.slice(0, 1) + '-' + nd.slice(1) : '', nd.length > 3 ? nd.slice(0, 2) + '-' + nd.slice(2) : ''].filter(Boolean))];
+      for (const r of regs){ list = await lookup('reg/' + encodeURIComponent(r)); if (list.length) break; }
+    }
+    if (!list.length && /^[0-9A-F]{6}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
+    if (!list.length){ msg(q + ' introuvable : pas en vol ou hors couverture.'); return; }
+    const a = adopt(list[0]); if (!a) return;
+    errMsg = ''; query = ''; $('#q').value = '';
+    select(a.hex);
+    map.setView(curPos(a), Math.max(map.getZoom(), 8));
+  } finally { gfBusy = false; }
 }
 async function refreshPinned(){
   const now = Date.now();
@@ -1132,7 +1139,12 @@ $('#bFav').addEventListener('click', () => {
   S.filter = S.filter === 'fav' ? 'all' : 'fav'; save(); renderChips(); renderAll();
 });
 $('#sort').addEventListener('change', e => { S.sort = e.target.value; save(); renderAll(); });
-$('#q').addEventListener('input', e => { query = e.target.value.trim(); renderAll(); });
+let gfTimer = 0;
+$('#q').addEventListener('input', e => {
+  query = e.target.value.trim(); renderAll();
+  clearTimeout(gfTimer);
+  if (query.length >= 3) gfTimer = setTimeout(() => { if (query && !filtered.length) globalFind(query); }, 900);
+});
 $('#q').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   e.preventDefault();
@@ -1142,7 +1154,8 @@ $('#q').addEventListener('keydown', e => {
     const r = routes.get(a.call), ci = r && r.s === 'ok' ? (r.d.ciata || '').toUpperCase() : '', c = a.call.toUpperCase();
     return c === qn || ic.includes(c) || ci === qn || a.hex.toUpperCase() === qn || (a.reg && a.reg.toUpperCase().replace(/-/g, '') === nh);
   });
-  if (hit) select(hit.hex); else if (filtered.length === 1) select(filtered[0].hex); else if (!filtered.length) globalFind(query);
+  clearTimeout(gfTimer);
+  if (hit) select(hit.hex); else if (filtered.length === 1) select(filtered[0].hex); else globalFind(query);
   e.target.blur();
 });
 $('#list').addEventListener('click', e => {
