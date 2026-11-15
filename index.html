@@ -1055,7 +1055,7 @@ function lookup(path){
     let left = bases.length, done = false;
     bases.forEach(async x => {
       try {
-        const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(6000)});
+        const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(x.n.startsWith('relais') ? 14000 : 7000)});
         if (!res.ok){ note(x.n, 'HTTP ' + res.status); if ([401, 403].includes(res.status)) deadSrc.add(x.n); }
         else {
           const j = await res.json();
@@ -1126,7 +1126,7 @@ async function scanFind(q, gid, ptsOver, extra, what){
   const one = async (src, pt) => {
     const bad = st => { badN.set(src.id, (badN.get(src.id) || 0) + 1); return {st:st}; };
     try {
-      const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(src.id[0] === 'p' ? 6000 : 8000)});
+      const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(src.id[0] === 'p' ? 14000 : 8000)});
       if (r.status === 429){ note('balayage ' + src.name, 'HTTP 429'); return {st:429}; }
       if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return bad(r.status); }
       const j = await r.json();
