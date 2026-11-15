@@ -1052,7 +1052,7 @@ function lookup(path){
     let left = bases.length, done = false;
     bases.forEach(async x => {
       try {
-        const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(10000)});
+        const res = await fetch(x.u(path), {headers:x.h, signal:sigTimeout(6000)});
         if (!res.ok){ note(x.n, 'HTTP ' + res.status); if ([401, 403].includes(res.status)) deadSrc.add(x.n); }
         else {
           const j = await res.json();
@@ -1118,40 +1118,45 @@ async function openskyFind(q, extra){
 async function scanFind(q, gid, ptsOver, extra, what){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd), ...(extra || [])]);
   const srcs = SOURCES.filter(x => x.id !== 'os' && (!x.needKey || S.fkey));
-  const cool = new Map(); let rot = 0;
+  const cool = new Map(), okN = new Map(), badN = new Map(); let rot = 0;
   const pts = ptsOver || scanPoints();
   const one = async (src, pt) => {
+    const bad = st => { badN.set(src.id, (badN.get(src.id) || 0) + 1); return {st:st}; };
     try {
-      const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(5000)});
+      const r = await fetch(src.url(pt[0], pt[1], 250), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(src.id[0] === 'p' ? 6000 : 8000)});
       if (r.status === 429){ note('balayage ' + src.name, 'HTTP 429'); return {st:429}; }
-      if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return {st:r.status}; }
+      if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return bad(r.status); }
       const j = await r.json();
-      note('balayage ' + src.name, 'ok');
+      note('balayage ' + src.name, 'ok'); okN.set(src.id, (okN.get(src.id) || 0) + 1);
       return {st:200, l:(src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && (callHit(calls, o.flight) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)))};
-    } catch(e){ note('balayage ' + src.name, 'bloqué'); return {st:0}; }
+    } catch(e){ note('balayage ' + src.name, 'bloqué'); return bad(0); }
   };
+  const alive = x => (okN.get(x.id) || 0) > 0 || (badN.get(x.id) || 0) < 2;
   scanning = false;
-  let next = 0, found = null;
+  let next = 0, found = null, nWork = 0;
   const worker = async () => {
     while (!found && next < pts.length){
       if (gid !== gfId) return;
       const i = next++;
       gmsg('Recherche de ' + q + (what || ' dans le monde') + '… ' + Math.round(i * 100 / pts.length) + ' %');
-      let done = false, guard = 0;
-      while (!done && !found && guard++ < 40){
+      let done = false;
+      while (!done && !found){
         if (gid !== gfId) return;
-        const now = Date.now();
-        const rd = srcs.filter(x => (cool.get(x.id) || 0) <= now), dir = rd.filter(x => x.id[0] !== 'p'), ready = dir.length ? dir : rd;
-        if (!ready.length){ await sleep(400); continue; }
-        const src = ready[rot++ % ready.length];
+        const live = srcs.filter(alive);
+        if (!live.length) return;
+        const now = Date.now(), ready = live.filter(x => (cool.get(x.id) || 0) <= now);
+        if (!ready.length){ await sleep(300); continue; }
+        const good = ready.filter(x => (okN.get(x.id) || 0) > 0), fresh = ready.filter(x => !(okN.get(x.id) || 0));
+        const pool = good.length && (!fresh.length || rot % 3) ? good : ready;
+        const src = pool[rot++ % pool.length];
+        cool.set(src.id, now + 400);
         const r = await one(src, pts[i]);
         if (r.st === 200){ done = true; if (r.l.length) found = r.l; }
-        else cool.set(src.id, Date.now() + (r.st === 429 ? 6000 : r.st === 0 ? 120000 : 120000));
+        else cool.set(src.id, Date.now() + (r.st === 429 ? 4000 : 30000));
       }
-      await sleep(60);
     }
   };
-  await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+  await Promise.all([worker(), worker(), worker(), worker(), worker()]);
   return gid !== gfId ? [] : (found || []);
 }
 function adopt(o){
