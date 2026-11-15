@@ -1060,7 +1060,7 @@ function lookup(path){
           note(x.n, l.length ? 'trouvé' : 'vide');
           if (l.length && !done){ done = true; resolve(l); }
         }
-      } catch(e){ note(x.n, 'bloqué'); }
+      } catch(e){ note(x.n, e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : 'bloqué (réseau/CORS)'); }
       finally { if (--left === 0 && !done) resolve([]); }
     });
   });
@@ -1129,7 +1129,7 @@ async function scanFind(q, gid, ptsOver, extra, what){
       const j = await r.json();
       note('balayage ' + src.name, 'ok'); okN.set(src.id, (okN.get(src.id) || 0) + 1);
       return {st:200, l:(src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && (callHit(calls, o.flight) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)))};
-    } catch(e){ note('balayage ' + src.name, 'bloqué'); return bad(0); }
+    } catch(e){ note('balayage ' + src.name, e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : 'bloqué (réseau/CORS)'); return bad(0); }
   };
   const alive = x => (okN.get(x.id) || 0) > 0 || (badN.get(x.id) || 0) < 2;
   scanning = false;
