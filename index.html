@@ -559,25 +559,28 @@ function sigTimeout(ms){
   const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal;
 }
 let scanning = false;
+const pollBad = new Map();
 async function poll(){
   if (scanning){ schedule(); return; }
   if (busy) return; busy = true;
   const usable = SOURCES.filter(s => !s.needKey || S.fkey);
   const order = S.source === 'auto' ? usable.map((_, i) => usable[(srcIdx + i) % usable.length]) : [SOURCES.find(s => s.id === S.source) || SOURCES[0]];
   let ok = false, lastErr = '', errs = [];
-  for (const src of order){
+  const nowP = Date.now(), live = S.source === 'auto' ? order.filter(x => (pollBad.get(x.id) || 0) <= nowP) : order;
+  for (const src of (live.length ? live : order)){
     try {
       const res = await fetch(src.url(dc.lat.toFixed(4), dc.lon.toFixed(4), Math.min(250, Math.round(dr))), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(src.id[0] === 'p' ? 5000 : 9000)});
       if (res.status === 429) throw new Error('Trop de requêtes (429)');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
       ingest(src.parse ? src.parse(j) : (j.ac || j.aircraft || []));
-      srcName = src.name; lastOk = Date.now(); ok = true;
+      srcName = src.name; lastOk = Date.now(); ok = true; pollBad.delete(src.id);
       if (S.source === 'auto') srcIdx = usable.indexOf(src);
       break;
     } catch(e){
       lastErr = (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : (e instanceof TypeError ? 'bloqué ou erreur : ' + e.message : e.message);
       errs.push(src.name + ' : ' + lastErr);
+      pollBad.set(src.id, Date.now() + (e instanceof TypeError || e.name === 'TimeoutError' || e.name === 'AbortError' ? 300000 : 60000));
     }
   }
   errMsg = ok ? '' : errs.join(' | ');
@@ -799,7 +802,7 @@ function passes(a, noq){
   if (query && !noq){
     const q = query.toLowerCase(), qn = q.replace(/\s+/g, ''), qis = icaoAll(qn.toUpperCase()).map(x => x.toLowerCase());
     const r = routes.get(a.call), ci = r && r.s === 'ok' ? (r.d.ciata || '').toLowerCase() : '', c = a.call.toLowerCase();
-    if (!(c.includes(qn) || qis.some(x => c.includes(x)) || (ci && ci.includes(qn)) || a.reg.toLowerCase().replace(/-/g, '').includes(qn.replace(/-/g, '')) || a.hex.includes(qn) || a.type.toLowerCase().includes(q) || a.op.toLowerCase().includes(q))) return false;
+    if (!(c.includes(qn) || qis.some(x => c.includes(x)) || (ci && ci.includes(qn)) || a.reg.toLowerCase().replace(/-/g, '').includes(qn.replace(/-/g, '')) || (a.hex === qn || (qn.length >= 4 && !/^[a-z0-9]{2}\d{1,4}[a-z]?$/.test(qn) && a.hex.includes(qn))) || a.type.toLowerCase().includes(q) || a.op.toLowerCase().includes(q))) return false;
   }
   return true;
 }
@@ -819,7 +822,7 @@ function renderChips(){
 function renderList(){
   const el = $('#list'), top = el.scrollTop;
   if (!filtered.length){
-    setHTML(el, '<div class="empty">' + (ac.size ? 'Aucun avion ne correspond aux filtres.' + (gfText ? '<br><br><b>' + esc(gfText) + '</b>' : '') : (lastOk ? 'Aucun avion dans la zone.' : (errMsg ? 'Impossible de récupérer les positions.<br><small>' + esc(errMsg) + '</small>' : 'Chargement…'))) + (query ? '<br><br><button class="btn accent" data-global="1">Chercher « ' + esc(query) + ' » dans le monde</button>' : '') + '</div>');
+    setHTML(el, '<div class="empty">' + (ac.size || gfText ? 'Aucun avion ne correspond aux filtres.' + (gfText ? '<br><br><b>' + esc(gfText) + '</b>' : '') : (lastOk ? 'Aucun avion dans la zone.' : (errMsg ? 'Impossible de récupérer les positions.<br><small>' + esc(errMsg) + '</small>' : 'Chargement…'))) + (query ? '<br><br><button class="btn accent" data-global="1">Chercher « ' + esc(query) + ' » dans le monde</button>' : '') + '</div>');
     return;
   }
   const rows = filtered.slice(0, 150).map(a => {
@@ -907,7 +910,7 @@ function renderDetail(){
     if (o.lat != null && de.lat != null){
       const d1 = hav(o.lat, o.lon, a.lat, a.lon), d2 = hav(a.lat, a.lon, de.lat, de.lon);
       prog = d1 + d2 > 0 ? Math.max(0, Math.min(100, d1 / (d1 + d2) * 100)) : 0; rem = d2;
-      if (!a.ground && a.gs > 60) eta = ' · arrivée ' + hhmm(new Date(Date.now() + d2 * 1000 / (a.gs * KT)));
+      if (!a.ground && a.gs > 60) eta = ' · arrivée ' + hhmm(new Date(Date.now() + d2 * 1000 / (a.gs * KT) * 1000));
     }
     rh = '<h4>Trajet</h4><div class="rt"><div class="ap"><b>' + esc(o.iata || o.icao) + '</b><span title="' + esc(o.name) + '">' + esc(o.city || o.name) + '</span></div>' +
       '<div class="rtm"><div class="rbar"><i style="width:' + (prog ?? 0).toFixed(1) + '%"></i>' + (prog != null ? '<u style="left:' + prog.toFixed(1) + '%"><svg viewBox="0 0 24 24"><path d="' + PLANE + '"/></svg></u>' : '') + '</div>' +
@@ -1067,7 +1070,7 @@ function lookup(path){
 }
 function scanPoints(){
   const boxes = [[30,62,-12,45],[18,40,-18,60],[22,52,-128,-65],[8,30,-110,-60],[-35,8,-80,-35],[10,50,60,100],[15,50,100,146],[-40,-10,112,155],[-35,15,10,50]];
-  const pts = [], st = 6.5;
+  const pts = [], st = 5.8;
   for (const [la0, la1, lo0, lo1] of boxes){
     for (let la = la0; la <= la1; la += st){
       const ls = st / Math.max(.4, Math.cos(la * Math.PI / 180));
@@ -1118,7 +1121,7 @@ async function openskyFind(q, extra){
 async function scanFind(q, gid, ptsOver, extra, what){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd), ...(extra || [])]);
   const srcs = SOURCES.filter(x => x.id !== 'os' && (!x.needKey || S.fkey));
-  const cool = new Map(), okN = new Map(), badN = new Map(); let rot = 0;
+  const cool = new Map(), okN = new Map(), badN = new Map(), gap = new Map(); let rot = 0;
   const pts = ptsOver || scanPoints();
   const one = async (src, pt) => {
     const bad = st => { badN.set(src.id, (badN.get(src.id) || 0) + 1); return {st:st}; };
@@ -1149,10 +1152,11 @@ async function scanFind(q, gid, ptsOver, extra, what){
         const good = ready.filter(x => (okN.get(x.id) || 0) > 0), fresh = ready.filter(x => !(okN.get(x.id) || 0));
         const pool = good.length && (!fresh.length || rot % 3) ? good : ready;
         const src = pool[rot++ % pool.length];
-        cool.set(src.id, now + 400);
+        cool.set(src.id, now + (gap.get(src.id) || 400));
         const r = await one(src, pts[i]);
-        if (r.st === 200){ done = true; if (r.l.length) found = r.l; }
-        else cool.set(src.id, Date.now() + (r.st === 429 ? 4000 : 30000));
+        if (r.st === 200){ done = true; gap.set(src.id, Math.max(300, (gap.get(src.id) || 400) * .9)); if (r.l.length) found = r.l; }
+        else if (r.st === 429){ gap.set(src.id, Math.min(2500, (gap.get(src.id) || 400) * 1.6)); cool.set(src.id, Date.now() + (gap.get(src.id) || 400) * 2); }
+        else cool.set(src.id, Date.now() + 30000);
       }
     }
   };
@@ -1193,7 +1197,7 @@ async function globalFindRun(raw, deep){
     list = await lookAny(regs.map(r => 'reg/' + encodeURIComponent(r)));
   }
   if (id !== gfId) return;
-  if (!list.length && /^[0-9A-F]{6}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
+  if (!list.length && /^[0-9A-F]{6}$/.test(nd) && !/^[A-Z0-9]{2}\d{4}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
   if (!list.length && deep && id === gfId){
     gmsg('Recherche de ' + q + ' dans le monde entier (OpenSky)…');
     list = await openskyFind(q, rt0 && rt0.call ? [rt0.call] : []);
@@ -1215,12 +1219,25 @@ async function globalFindRun(raw, deep){
   select(a.hex);
   map.setView(curPos(a), Math.max(map.getZoom(), 8));
 }
+async function nearHex(la, lo, hex){
+  const usable = SOURCES.filter(x => !x.needKey || S.fkey).filter(x => (pollBad.get(x.id) || 0) <= Date.now() || x.id === 'fly');
+  for (const src of usable.slice(0, 3)){
+    try {
+      const r = await fetch(src.url(la.toFixed(3), lo.toFixed(3), 60), {headers:src.headers ? src.headers() : undefined, signal:sigTimeout(6000)});
+      if (!r.ok) continue;
+      const j = await r.json();
+      return (src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => o.hex && o.hex.toLowerCase() === hex && typeof o.lat === 'number' && typeof o.lon === 'number');
+    } catch(e){}
+  }
+  return [];
+}
 async function refreshPinned(){
   const now = Date.now();
   for (const [h, old] of [...pinned]){
     const cur = ac.get(h);
     if (cur && cur !== old){ pinned.set(h, cur); continue; }
-    const l = await lookup('hex/' + h);
+    let l = await lookup('hex/' + h);
+    if (!l.length) l = await nearHex(old.lat, old.lon, h);
     if (!pinned.has(h)) continue;
     if (l.length) adopt(l[0]);
     else if (now - old.t0 > 180000){ pinned.delete(h); ac.delete(h); }
