@@ -1211,7 +1211,7 @@ async function globalFindRun(raw, deep){
     if (rt) list = await scanFind(q, id, rt.pts, rt.call ? [rt.call] : [], ' sur son trajet (' + rt.label + ')');
     else what = ' dans le monde (trajet introuvable)';
   }
-  if (!list.length && deep && id === gfId) list = await scanFind(q, id, null, rt0 && rt0.call ? [rt0.call] : [], what);
+  if (!list.length && deep && id === gfId && !rt0) list = await scanFind(q, id, null, [], what);
   if (id !== gfId) return;
   if (!list.length){ gmsg(q + ' introuvable. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
   const a = adopt(list[0]); if (!a) return;
