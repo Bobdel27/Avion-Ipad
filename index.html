@@ -1211,9 +1211,9 @@ async function globalFindRun(raw, deep, force){
     if (rt) list = await scanFind(q, id, rt.pts, rt.call ? [rt.call] : [], ' sur son trajet (' + rt.label + ')');
     else what = ' dans le monde (trajet introuvable)';
   }
-  if (!list.length && deep && id === gfId && (!rt0 || force)) list = await scanFind(q, id, null, [], what);
+  if (!list.length && deep && id === gfId) list = await scanFind(q, id, null, [], what);
   if (id !== gfId) return;
-  if (!list.length){ gmsg(q + ' introuvable' + (rt0 ? ' (trajet ' + rt0.label + ' parcouru, avion non capté)' : '') + '. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
+  if (!list.length){ gmsg(q + ' introuvable' + (rt0 ? ' (trajet annoncé ' + rt0.label + ', avion non capté)' : '') + '. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
   const a = adopt(list[0]); if (!a) return;
   errMsg = ''; gfText = ''; query = ''; $('#q').value = '';
   select(a.hex);
