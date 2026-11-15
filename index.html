@@ -1173,12 +1173,12 @@ function adopt(o){
 let gfTimer = 0, gfId = 0, gfText = '';
 function gmsg(t, ms){ gfText = t; msg(t, ms); renderList(); }
 let gfDeepOn = 0;
-async function globalFind(raw, deep){
+async function globalFind(raw, deep, force){
   if (!deep && gfDeepOn) return;
-  if (deep){ clearTimeout(gfTimer); gfDeepOn++; try { return await globalFindRun(raw, deep); } finally { gfDeepOn--; } }
+  if (deep){ clearTimeout(gfTimer); gfDeepOn++; try { return await globalFindRun(raw, deep, force); } finally { gfDeepOn--; } }
   return globalFindRun(raw, deep);
 }
-async function globalFindRun(raw, deep){
+async function globalFindRun(raw, deep, force){
   const q = (raw || '').replace(/\s+/g, '').toUpperCase(); if (!q) return;
   const id = ++gfId; lookStats = {}; gmsg('Recherche de ' + q + '…');
   const nd = q.replace(/-/g, '');
@@ -1211,9 +1211,9 @@ async function globalFindRun(raw, deep){
     if (rt) list = await scanFind(q, id, rt.pts, rt.call ? [rt.call] : [], ' sur son trajet (' + rt.label + ')');
     else what = ' dans le monde (trajet introuvable)';
   }
-  if (!list.length && deep && id === gfId && !rt0) list = await scanFind(q, id, null, [], what);
+  if (!list.length && deep && id === gfId && (!rt0 || force)) list = await scanFind(q, id, null, [], what);
   if (id !== gfId) return;
-  if (!list.length){ gmsg(q + ' introuvable. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
+  if (!list.length){ gmsg(q + ' introuvable' + (rt0 ? ' (trajet ' + rt0.label + ' parcouru, avion non capté)' : '') + '. Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
   const a = adopt(list[0]); if (!a) return;
   errMsg = ''; gfText = ''; query = ''; $('#q').value = '';
   select(a.hex);
@@ -1335,7 +1335,7 @@ $('#q').addEventListener('keydown', e => {
   e.target.blur();
 });
 $('#list').addEventListener('click', e => {
-  if (e.target.closest('[data-global]')){ deadSrc.clear(); globalFind(query, true); return; }
+  if (e.target.closest('[data-global]')){ deadSrc.clear(); globalFind(query, true, true); return; }
   const b = e.target.closest('[data-h]'); if (b) select(b.dataset.h);
 });
 $('#alerts').addEventListener('click', e => { const b = e.target.closest('[data-h]'); if (b) select(b.dataset.h); });
