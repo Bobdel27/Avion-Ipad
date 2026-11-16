@@ -1229,10 +1229,10 @@ async function globalFindRun(raw, deep, force){
           const c = (o.flight || '').trim().toUpperCase(), rr = await getRt(c), known = rr && rr.o && rr.d;
           note(c, known ? rr.o.icao + '>' + rr.d.icao : 'trajet inconnu');
           if (known && rr.o.icao === rt0.oi && rr.d.icao === rt0.di) out.push(o);
-          else if (!known && near(o)) unk.push(o);
+          else if (!known && near(o) && !((o.dbFlags | 0) & 1) && /^[A-Z]{3}\d[A-Z0-9]{0,3}$/.test(c)) unk.push(o);
         }));
       }
-      if (!out.length && unk.length){ unk.sort((x, y) => pdist(x) - pdist(y)); probable = true; return [unk[0]]; }
+      if (!out.length && unk.length === 1){ probable = true; return unk; }
       return out;
     };
     list = await scanFind(q, id, rt0.pts, [], ' sur son trajet', {pred:o => (o.flight || '').trim().toUpperCase().startsWith(pre) || near(o), verify:verify});
