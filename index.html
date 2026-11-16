@@ -1207,12 +1207,13 @@ async function globalFindRun(raw, deep, force){
   if (!list.length && /^[0-9A-F]{6}$/.test(nd) && !/^[A-Z0-9]{2}\d{4}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
   if (!list.length && deep && rt0 && rt0.oi && rt0.di && rt0.call){
     gmsg('Recherche de ' + q + ' parmi les avions de la compagnie sur son trajet…');
+    let probable = false;
     const pre = rt0.call.slice(0, 3), seenC = new Map(), path = gcPts(rt0.oa, rt0.da, 40), bear = brg(rt0.oa[0], rt0.oa[1], rt0.da[0], rt0.da[1]);
+    const pdist = o => { let m = 1e9; for (const p of path){ const d = hav(o.lat, o.lon, p[0], p[1]); if (d < m) m = d; } return m; };
     const near = o => {
       if (o.alt_baro === 'ground' || !(typeof o.alt_baro === 'number' ? o.alt_baro > 2500 : true) || !(o.flight || '').trim()) return false;
       const tk = o.track ?? o.true_heading; if (tk != null){ const d = Math.abs(((tk - bear + 540) % 360) - 180); if (d > 50) return false; }
-      let m = 1e9; for (const p of path){ const d = hav(o.lat, o.lon, p[0], p[1]); if (d < m) m = d; }
-      return m < 60;
+      return pdist(o) < 60;
     };
     const getRt = async c => {
       if (!seenC.has(c)){
@@ -1222,17 +1223,21 @@ async function globalFindRun(raw, deep, force){
     };
     const verify = async cands => {
       note('avions sur le trajet', cands.length + ' vu(s)');
-      const out = [], list2 = cands.filter(o => (o.flight || '').trim()).slice(0, 30);
+      const out = [], unk = [], list2 = cands.filter(o => (o.flight || '').trim()).slice(0, 30);
       for (let i = 0; i < list2.length; i += 6){
         await Promise.all(list2.slice(i, i + 6).map(async o => {
-          const c = (o.flight || '').trim().toUpperCase(), rr = await getRt(c);
-          if (rr && rr.o && rr.d && rr.o.icao === rt0.oi && rr.d.icao === rt0.di) out.push(o);
+          const c = (o.flight || '').trim().toUpperCase(), rr = await getRt(c), known = rr && rr.o && rr.d;
+          note(c, known ? rr.o.icao + '>' + rr.d.icao : 'trajet inconnu');
+          if (known && rr.o.icao === rt0.oi && rr.d.icao === rt0.di) out.push(o);
+          else if (!known && near(o)) unk.push(o);
         }));
       }
+      if (!out.length && unk.length){ unk.sort((x, y) => pdist(x) - pdist(y)); probable = true; return [unk[0]]; }
       return out;
     };
     list = await scanFind(q, id, rt0.pts, [], ' sur son trajet', {pred:o => (o.flight || '').trim().toUpperCase().startsWith(pre) || near(o), verify:verify});
     if (id !== gfId) return;
+    if (list.length && probable) setTimeout(() => msg('Avion probable : son trajet n’est pas confirmé (indicatif inconnu de la base).', 15000), 300);
   }
   const checked = !list.length && Object.keys(lookStats).some(k => / vide$/.test(k) && !/^balayage/.test(k) && !/^relais/.test(k));
   if (checked && !force){ gmsg(q + ' : aucun avion en vol avec ce numéro de vol en ce moment' + (rt0 ? ' (vol annoncé ' + rt0.label + ')' : '') + '. Si le vol est bien en l’air, utilise « Chercher dans le monde ». Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
