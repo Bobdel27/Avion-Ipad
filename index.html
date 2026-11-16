@@ -1210,12 +1210,14 @@ async function globalFindRun(raw, deep, force){
     const pre = rt0.call.slice(0, 3), seenC = new Map();
     const verify = async cands => {
       const out = [];
+      note('compagnie ' + pre, cands.length + ' avion(s) vu(s)');
       for (const o of cands.slice(0, 8)){
         const c = (o.flight || '').trim().toUpperCase(); if (!c) continue;
         if (!seenC.has(c)){
           try { const r = await fetch('https://api.adsbdb.com/v0/callsign/' + encodeURIComponent(c), {signal:sigTimeout(6000)}); seenC.set(c, r.ok ? parseRoute(await r.json()) : null); } catch(e){ seenC.set(c, null); }
         }
         const rr = seenC.get(c);
+        note(c, rr && rr.o && rr.d ? rr.o.icao + '>' + rr.d.icao : 'trajet inconnu');
         if (rr && rr.o && rr.d && rr.o.icao === rt0.oi && rr.d.icao === rt0.di) out.push(o);
       }
       return out;
@@ -1224,7 +1226,7 @@ async function globalFindRun(raw, deep, force){
     if (id !== gfId) return;
   }
   const checked = !list.length && Object.keys(lookStats).some(k => / vide$/.test(k) && !/^balayage/.test(k) && !/^relais/.test(k));
-  if (checked && !force){ gmsg(q + ' : aucun avion en vol avec ce numéro de vol en ce moment' + (rt0 ? ' (vol annoncé ' + rt0.label + ')' : '') + '. Si le vol est bien en l’air, utilise « Chercher dans le monde ».', 30000); return; }
+  if (checked && !force){ gmsg(q + ' : aucun avion en vol avec ce numéro de vol en ce moment' + (rt0 ? ' (vol annoncé ' + rt0.label + ')' : '') + '. Si le vol est bien en l’air, utilise « Chercher dans le monde ». Détail : ' + (Object.keys(lookStats).map(k => k + ' ×' + lookStats[k]).join(' ; ') || 'aucune requête') + '.', 30000); return; }
   if (!list.length && deep && id === gfId){
     gmsg('Recherche de ' + q + ' dans le monde entier (OpenSky)…');
     list = await openskyFind(q, rt0 && rt0.call ? [rt0.call] : []);
