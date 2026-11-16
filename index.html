@@ -1232,7 +1232,7 @@ async function globalFindRun(raw, deep, force){
           else if (!known && near(o) && !((o.dbFlags | 0) & 1) && /^[A-Z]{3}\d[A-Z0-9]{0,3}$/.test(c)) unk.push(o);
         }));
       }
-      if (!out.length && unk.length === 1){ probable = true; return unk; }
+      
       return out;
     };
     list = await scanFind(q, id, rt0.pts, [], ' sur son trajet', {pred:o => (o.flight || '').trim().toUpperCase().startsWith(pre) || near(o), verify:verify});
