@@ -1194,7 +1194,7 @@ async function globalFindRun(raw, deep, force){
   gmsg('Recherche de ' + q + ' (trajet)…');
   const rt0 = /\d/.test(nd) ? await routeFor(q) : null;
   if (id !== gfId) return;
-  gmsg('Recherche de ' + q + ' (indicatif)…');
+  gmsg('Recherche de ' + q + ' (numéro de vol)…');
   const lookAny = async paths => (await Promise.all(paths.map(lookup))).find(l => l.length) || [];
   list = await lookAny([...new Set([q, nd, ...icaoAll(nd), ...(rt0 && rt0.call ? [rt0.call] : [])])].map(c => 'callsign/' + encodeURIComponent(c)));
   if (id !== gfId) return;
@@ -1206,7 +1206,7 @@ async function globalFindRun(raw, deep, force){
   if (id !== gfId) return;
   if (!list.length && /^[0-9A-F]{6}$/.test(nd) && !/^[A-Z0-9]{2}\d{4}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
   const checked = !list.length && Object.keys(lookStats).some(k => / vide$/.test(k) && !/^balayage/.test(k) && !/^relais/.test(k));
-  if (checked && !force){ gmsg(q + ' : aucun avion en vol avec cet indicatif en ce moment' + (rt0 ? ' (vol annoncé ' + rt0.label + ')' : '') + '. Si le vol est bien en l’air, utilise « Chercher dans le monde ».', 30000); return; }
+  if (checked && !force){ gmsg(q + ' : aucun avion en vol avec ce numéro de vol en ce moment' + (rt0 ? ' (vol annoncé ' + rt0.label + ')' : '') + '. Si le vol est bien en l’air, utilise « Chercher dans le monde ».', 30000); return; }
   if (!list.length && deep && id === gfId){
     gmsg('Recherche de ' + q + ' dans le monde entier (OpenSky)…');
     list = await openskyFind(q, rt0 && rt0.call ? [rt0.call] : []);
