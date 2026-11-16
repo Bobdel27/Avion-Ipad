@@ -1111,7 +1111,7 @@ async function routeFor(q){
     } catch(e){ return null; }
   }));
   const ok = rs.find(Boolean); if (!ok) return null;
-  return {pts:gcPoints(ok.r.o, ok.r.d), call:ok.call, label:(ok.r.o.city || ok.r.o.iata) + ' → ' + (ok.r.d.city || ok.r.d.iata)};
+  return {pts:gcPoints(ok.r.o, ok.r.d), call:ok.call, oi:ok.r.o.icao, di:ok.r.d.icao, label:(ok.r.o.city || ok.r.o.iata) + ' → ' + (ok.r.d.city || ok.r.d.iata)};
 }
 const callHit = (set, f) => { f = (f || '').trim().toUpperCase(); if (!f) return false; if (set.has(f)) return true; for (const m of set) if (/^[A-Z]{3}\d/.test(m) && f.startsWith(m) && /^[A-Z]{1,2}$/.test(f.slice(m.length))) return true; return false; };
 async function openskyFind(q, extra){
@@ -1125,7 +1125,7 @@ async function openskyFind(q, extra){
     return l;
   } catch(e){ note('OpenSky (monde)', 'bloqué'); return []; }
 }
-async function scanFind(q, gid, ptsOver, extra, what){
+async function scanFind(q, gid, ptsOver, extra, what, opt){
   const nd = q.replace(/-/g, ''), calls = new Set([q, nd, ...icaoAll(nd), ...(extra || [])]);
   const srcs = SOURCES.filter(x => x.id !== 'os' && (!x.needKey || S.fkey));
   const cool = new Map(), okN = new Map(), badN = new Map(), gap = new Map(); let rot = 0;
@@ -1138,7 +1138,7 @@ async function scanFind(q, gid, ptsOver, extra, what){
       if (!r.ok){ note('balayage ' + src.name, 'HTTP ' + r.status); return bad(r.status); }
       const j = await r.json();
       note('balayage ' + src.name, 'ok'); okN.set(src.id, (okN.get(src.id) || 0) + 1);
-      return {st:200, l:(src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && (callHit(calls, o.flight) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)))};
+      return {st:200, l:(src.parse ? src.parse(j) : (j.ac || j.aircraft || [])).filter(o => typeof o.lat === 'number' && typeof o.lon === 'number' && (opt && opt.pred ? opt.pred(o) : callHit(calls, o.flight) || (o.r && o.r.toUpperCase().replace(/-/g, '') === nd) || (o.hex && o.hex.toUpperCase() === nd)))};
     } catch(e){ note('balayage ' + src.name, e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'délai dépassé' : 'bloqué (réseau/CORS)'); return bad(0); }
   };
   const alive = x => (okN.get(x.id) || 0) > 0 || (badN.get(x.id) || 0) < 2;
@@ -1161,7 +1161,7 @@ async function scanFind(q, gid, ptsOver, extra, what){
         const src = pool[rot++ % pool.length];
         cool.set(src.id, now + (gap.get(src.id) || 400));
         const r = await one(src, pts[i]);
-        if (r.st === 200){ done = true; gap.set(src.id, Math.max(300, (gap.get(src.id) || 400) * .9)); if (r.l.length) found = r.l; }
+        if (r.st === 200){ done = true; gap.set(src.id, Math.max(300, (gap.get(src.id) || 400) * .9)); if (r.l.length){ const v = opt && opt.verify ? await opt.verify(r.l) : r.l; if (v.length) found = v; } }
         else if (r.st === 429){ gap.set(src.id, Math.min(2500, (gap.get(src.id) || 400) * 1.6)); cool.set(src.id, Date.now() + (gap.get(src.id) || 400) * 2); }
         else cool.set(src.id, Date.now() + 30000);
       }
@@ -1205,6 +1205,24 @@ async function globalFindRun(raw, deep, force){
   }
   if (id !== gfId) return;
   if (!list.length && /^[0-9A-F]{6}$/.test(nd) && !/^[A-Z0-9]{2}\d{4}$/.test(nd)) list = await lookup('hex/' + nd.toLowerCase());
+  if (!list.length && deep && rt0 && rt0.oi && rt0.di && rt0.call){
+    gmsg('Recherche de ' + q + ' parmi les avions de la compagnie sur son trajet…');
+    const pre = rt0.call.slice(0, 3), seenC = new Map();
+    const verify = async cands => {
+      const out = [];
+      for (const o of cands.slice(0, 8)){
+        const c = (o.flight || '').trim().toUpperCase(); if (!c) continue;
+        if (!seenC.has(c)){
+          try { const r = await fetch('https://api.adsbdb.com/v0/callsign/' + encodeURIComponent(c), {signal:sigTimeout(6000)}); seenC.set(c, r.ok ? parseRoute(await r.json()) : null); } catch(e){ seenC.set(c, null); }
+        }
+        const rr = seenC.get(c);
+        if (rr && rr.o && rr.d && rr.o.icao === rt0.oi && rr.d.icao === rt0.di) out.push(o);
+      }
+      return out;
+    };
+    list = await scanFind(q, id, rt0.pts, [], ' sur son trajet', {pred:o => (o.flight || '').trim().toUpperCase().startsWith(pre), verify:verify});
+    if (id !== gfId) return;
+  }
   const checked = !list.length && Object.keys(lookStats).some(k => / vide$/.test(k) && !/^balayage/.test(k) && !/^relais/.test(k));
   if (checked && !force){ gmsg(q + ' : aucun avion en vol avec ce numéro de vol en ce moment' + (rt0 ? ' (vol annoncé ' + rt0.label + ')' : '') + '. Si le vol est bien en l’air, utilise « Chercher dans le monde ».', 30000); return; }
   if (!list.length && deep && id === gfId){
